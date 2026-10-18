@@ -22,18 +22,18 @@ stateDiagram-v2
   CANCELLED --> [*]
 ```
 
-| Command and allowed job source | Attempt change | Capacity effect | Required audit |
-| --- | --- | --- | --- |
-| Create | None | None | JOB_CREATED, actor and submitted fields |
-| Mark ready: NEW | None | None | JOB_READY |
-| Recommend: READY or MANUAL | Snapshot only; if none, set manual reason NO_ELIGIBLE_RIDER | None | RIDERS_RECOMMENDED; MANUAL_QUEUE_ENTERED only on actual entry |
-| Assign/reassign: READY or MANUAL | New PENDING, active true; store expiry, score and optional override | Increment reservedUnits/load and activeJobCount | ASSIGNMENT_CREATED; REASSIGNED if prior attempt; MANUAL_OVERRIDE if applicable |
-| Accept: AWAITING, matching active attempt | PENDING → ACCEPTED, before expiry | Keep reservation | ASSIGNMENT_ACCEPTED; job ACCEPTED |
-| Reject: AWAITING, matching active attempt | PENDING → REJECTED, active false, release marker | Decrement exactly once | ASSIGNMENT_REJECTED; MANUAL_QUEUE_ENTERED, reason RIDER_REJECTED |
-| Expire: AWAITING, matching active attempt | PENDING → EXPIRED, active false, release marker | Decrement exactly once | ASSIGNMENT_EXPIRED; MANUAL_QUEUE_ENTERED, reason RESPONSE_TIMEOUT |
-| Pickup: ACCEPTED | ACCEPTED → PICKED_UP | Keep reservation | JOB_PICKED_UP |
-| Deliver: PICKED_UP | PICKED_UP → DELIVERED, active false, release marker | Decrement exactly once | JOB_DELIVERED |
-| Cancel: NEW, READY, MANUAL, AWAITING, ACCEPTED | Active pending/accepted attempt → CANCELLED, inactive, release marker | Release if reserved; otherwise no change | JOB_CANCELLED, actor/reason and attempt outcome if present |
+| Command and allowed job source                 | Attempt change                                                        | Capacity effect                                 | Required audit                                                                 |
+| ---------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------ |
+| Create                                         | None                                                                  | None                                            | JOB_CREATED, actor and submitted fields                                        |
+| Mark ready: NEW                                | None                                                                  | None                                            | JOB_READY                                                                      |
+| Recommend: READY or MANUAL                     | Snapshot only; if none, set manual reason NO_ELIGIBLE_RIDER           | None                                            | RIDERS_RECOMMENDED; MANUAL_QUEUE_ENTERED only on actual entry                  |
+| Assign/reassign: READY or MANUAL               | New PENDING, active true; store expiry, score and optional override   | Increment reservedUnits/load and activeJobCount | ASSIGNMENT_CREATED; REASSIGNED if prior attempt; MANUAL_OVERRIDE if applicable |
+| Accept: AWAITING, matching active attempt      | PENDING → ACCEPTED, before expiry                                     | Keep reservation                                | ASSIGNMENT_ACCEPTED; job ACCEPTED                                              |
+| Reject: AWAITING, matching active attempt      | PENDING → REJECTED, active false, release marker                      | Decrement exactly once                          | ASSIGNMENT_REJECTED; MANUAL_QUEUE_ENTERED, reason RIDER_REJECTED               |
+| Expire: AWAITING, matching active attempt      | PENDING → EXPIRED, active false, release marker                       | Decrement exactly once                          | ASSIGNMENT_EXPIRED; MANUAL_QUEUE_ENTERED, reason RESPONSE_TIMEOUT              |
+| Pickup: ACCEPTED                               | ACCEPTED → PICKED_UP                                                  | Keep reservation                                | JOB_PICKED_UP                                                                  |
+| Deliver: PICKED_UP                             | PICKED_UP → DELIVERED, active false, release marker                   | Decrement exactly once                          | JOB_DELIVERED                                                                  |
+| Cancel: NEW, READY, MANUAL, AWAITING, ACCEPTED | Active pending/accepted attempt → CANCELLED, inactive, release marker | Release if reserved; otherwise no change        | JOB_CANCELLED, actor/reason and attempt outcome if present                     |
 
 Every listed mutation and its events commit together. MANUAL has no active attempt or assigned rider; the prior attempt remains queryable. DELIVERED/CANCELLED are terminal. Cancellation after pickup is rejected (409); real post-pickup failure/return workflows are outside this exercise. A dispatcher cannot overwrite a pending attempt directly: reject/cancel must finish its reservation first. Reassignment is a new attempt from MANUAL, not a rewrite of an old one.
 
