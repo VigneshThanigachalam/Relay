@@ -2,7 +2,9 @@
 
 ## Current scope
 
-Phase 1 implements the development foundation only. Requirements/design/contracts are reviewable proposals. There are no business routes, Mongoose domain schemas, reservation transactions, actual timeout worker, seed command, operational dashboard or final one-page presentation yet. No business acceptance criteria are claimed complete. See the requirements checklist and Phase 1 report for exact evidence.
+Phase 2 implements domain status/transition rules, expiry boundaries, rider-counter invariants, Job/Rider/Assignment/JobEvent schemas, named indexes, type-specific audit payload validation, append-only model guards, explicit persistence initialization and a transaction helper. Focused comments explain safety/consistency decisions. Real MongoDB integration checks verify these foundations.
+
+There are still no job/rider business routes, ranking implementation, capacity-reservation service, actual timeout worker, public seed command, operational dashboard or final one-page presentation. Transaction infrastructure tests do not prove full dispatch workflows. See the requirements checklist and both phase reports for evidence.
 
 ## Assumptions
 
@@ -12,7 +14,11 @@ Idempotency is a single-operation contract with stored hashes, not a process-mem
 
 ## Known limitations and verification gaps
 
-MongoDB server and Docker executables are not available in the current environment. The compose recipe is provided for reviewers but cannot be claimed executed here. Replica-set transactions, indexes, reservation races and seeded workflow require a real database in later phases. Do not replace these with mocked database tests as evidence of concurrency correctness. Foundation HTTP/UI tests do not verify MongoDB connectivity. No standalone browser walkthrough has yet been performed. Source and all genuine local Git refs/history are included in the Phase 1 handoff archive; there is no remote repository configured.
+A development-only harness now downloads and starts actual MongoDB 8.0.17 processes, including a single-node replica set. Real index constraints, transaction commit/rollback and refusal of standalone MongoDB are verified. The initial default socket startup failed with an operation-not-permitted error; the TCP-only harness runs successfully without elevated permissions. Docker remains unavailable and the compose recipe remains unexecuted. No browser visual walkthrough or full seeded workflow has been performed. There is no remote Git repository configured.
+
+Schema pre-validation hooks run for document creation/save, not arbitrary query updates. Mongoose guards are not database permissions. Foreign keys, request replay semantics, audit-sequence allocation and cross-document counter equality require the later service implementations. Database-level unique indexes protect the specific uniqueness rules now; tests do not claim full concurrent assignment or release-once behavior.
+
+The test suite needs a first-run binary download (roughly 100 MB) or a configured local test binary. It creates and removes temporary fixture-owned data and never uses a user-configured production URI. No mocked or silently skipped database tests are counted as real integration coverage.
 
 Application append-only audit prevents edits through supported APIs, not a privileged DB administrator. Polling delivers timeout handling on the next successful scan; it is not an exact-time scheduler. A single-node replica set has no redundancy. A simple fleet-wide in-memory sort is appropriate for the assignment; huge fleets need indexed shortlisting and better telemetry. These are design limits, not implemented behavior in this phase.
 

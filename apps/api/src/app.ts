@@ -5,6 +5,8 @@ import { errorHandler, sendError } from './http/errors.js';
 type AppDependencies = { isReady?: () => boolean };
 
 export function createApp({ isReady = () => false }: AppDependencies = {}) {
+  // Building the app must not open sockets or connect to MongoDB: Supertest can
+  // exercise HTTP contracts while server.ts owns the real process lifecycle.
   const app = express();
   app.disable('x-powered-by');
   app.use((_req, res, next) => {
@@ -19,6 +21,8 @@ export function createApp({ isReady = () => false }: AppDependencies = {}) {
     res.json({ data: { status: 'ok' } });
   });
   app.get('/health/ready', (req, res) => {
+    // Liveness answers "is the process alive?"; readiness answers whether it
+    // can safely serve work. Keeping them separate avoids false healthy states.
     if (!isReady()) {
       sendError(req, res, 503, 'DEPENDENCY_UNAVAILABLE', 'Database is not connected');
       return;

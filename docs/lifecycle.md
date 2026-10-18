@@ -1,6 +1,6 @@
 # Job and assignment lifecycle
 
-Design only in Phase 1. Use explicit command endpoints and guarded services; never expose a generic unrestricted PATCH status endpoint.
+Phase 2 implements and tests the pure transition tables, expiry boundary and capacity-state invariants. The command/transaction workflows in the table below remain planned; they are not exposed as business endpoints yet. Use explicit command endpoints and guarded services; never expose a generic unrestricted PATCH status endpoint.
 
 ```mermaid
 stateDiagram-v2

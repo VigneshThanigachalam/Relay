@@ -3,6 +3,8 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   plugins: [react()],
+  // Browser requests stay same-origin in development. Database credentials
+  // remain exclusively in the API environment, never in VITE_* variables.
   server: {
     port: 5173,
     strictPort: true,

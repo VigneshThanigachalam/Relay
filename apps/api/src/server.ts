@@ -4,6 +4,8 @@ import { connectDatabase, disconnectDatabase, isDatabaseReady } from './infrastr
 
 async function start() {
   const config = parseEnv(process.env);
+  // Fail before listening when persistence is unavailable. A successful HTTP
+  // startup must never imply that we silently switched to in-memory storage.
   await connectDatabase(config.MONGODB_URI);
   const server = createApp({ isReady: isDatabaseReady }).listen(config.PORT, () => {
     console.info(`RELAY API listening on port ${config.PORT}`);
@@ -18,6 +20,8 @@ async function start() {
   const stop = () => {
     if (stopping) return;
     stopping = true;
+    // Stop accepting HTTP work before disconnecting the database; give existing
+    // requests a bounded drain period so shutdown cannot hang indefinitely.
     const forceExit = setTimeout(() => process.exit(1), 10000).unref();
     server.close(() => {
       void disconnectDatabase()
