@@ -8,9 +8,9 @@ describe('foundation screen', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
       'The Autonomous Dispatch Desk',
     );
-    expect(screen.getByRole('region', { name: 'Phase 2 ready for review' })).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Phase 3 ready for review' })).toBeVisible();
     expect(
-      screen.getByText('No delivery data or operational actions are available in this phase.'),
+      screen.getByText('This screen does not expose delivery data or dispatch actions yet.'),
     ).toBeVisible();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });

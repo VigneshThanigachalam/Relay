@@ -51,3 +51,7 @@ Allowed: source extraction, requirement mapping, proposed schemas/contracts/rank
 ## Phase 2 checkpoint
 
 Completed on `feat/domain-models` after Phase 1 approval: focused code comments; pure job/attempt transitions and expiry/counter rules; four schemas and their indexes; typed audit/snapshot payloads and append-only model guards; replica-set/index/transaction readiness; real MongoDB integration tests. All changes use genuine commits. No job-management or later feature APIs are included. Next branch: `feat/job-management` after Phase 2 review. See `phase-2-report.md` for actual verification and limitations.
+
+## Phase 3 checkpoint
+
+Completed on `feat/job-management`: request/error contracts, canonical hashing, transactional creation/audit, persistent duplicate/key replay, snapshot list/filter/history reads, detail and guarded ready commands. Real MongoDB HTTP tests verify parallel creates, ready races, rollback and replay recovery. Comments explain the non-obvious consistency decisions. The single-key creation policy is documented in job-api.md. No rider/assignment APIs or operational dashboard are included. Next branch: `feat/rider-management` after Phase 3 review.

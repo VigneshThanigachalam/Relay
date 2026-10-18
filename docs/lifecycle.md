@@ -1,6 +1,6 @@
 # Job and assignment lifecycle
 
-Phase 2 implements and tests the pure transition tables, expiry boundary and capacity-state invariants. The command/transaction workflows in the table below remain planned; they are not exposed as business endpoints yet. Use explicit command endpoints and guarded services; never expose a generic unrestricted PATCH status endpoint.
+Phase 2 implements and tests the pure transition tables, expiry boundary and capacity-state invariants. Phase 3 adds real create, detail/history and guarded NEW → READY commands; create/ready audit writes share the state transaction. Other command/transaction workflows in the table remain planned. Ready replay is handled by the service before the pure transition table; it never resets later states. Use explicit command endpoints and guarded services; never expose a generic unrestricted PATCH status endpoint.
 
 ```mermaid
 stateDiagram-v2

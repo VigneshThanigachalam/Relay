@@ -5,12 +5,12 @@ export function App() {
       <h1>The Autonomous Dispatch Desk</h1>
       <p className="intro">Development foundation</p>
       <section aria-labelledby="phase-status">
-        <h2 id="phase-status">Phase 2 ready for review</h2>
+        <h2 id="phase-status">Phase 3 ready for review</h2>
         <p>
-          The workspace, domain models and architecture are prepared. Dispatch operations will be
+          Job management APIs and the domain foundation are verified. Dispatch operations will be
           added in subsequent feature branches.
         </p>
-        <p>No delivery data or operational actions are available in this phase.</p>
+        <p>This screen does not expose delivery data or dispatch actions yet.</p>
       </section>
     </main>
   );
