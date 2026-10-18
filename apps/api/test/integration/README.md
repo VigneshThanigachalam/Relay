@@ -1,3 +1,5 @@
-# Database integration test gate
+# Real database integration tests
 
-Future integration tests must run against real MongoDB in replica-set mode, using an isolated test database. Mocked models do not prove transaction, unique-index or concurrency guarantees. Phase 1 tests exercise HTTP/configuration only. See docs/requirements.md for planned test obligations.
+`persistence.test.ts` starts real MongoDB 8.0.17 through the development-only `mongodb-memory-server-core` harness. It checks actual indexes, concurrent uniqueness conflicts, history guards, transaction commit/rollback, startup readiness and refusal of standalone MongoDB. These are infrastructure tests; full dispatch-service races are still pending.
+
+The first run requires a binary download; subsequent runs use its cache. Temporary database processes/data are owned by the fixtures, and no application/production URI is used. Unix sockets are disabled; clients use TCP. No tests silently skip when the binary is unavailable. See root README for test-harness environment options.

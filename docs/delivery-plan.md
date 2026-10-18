@@ -47,3 +47,7 @@ git merge --no-ff feat/domain-models -m "chore: merge verified domain models"
 ## Phase 1 boundary
 
 Allowed: source extraction, requirement mapping, proposed schemas/contracts/ranking/lifecycle, tooling, configuration parsing, Express health/errors, React entry, local MongoDB compose recipe, foundation tests and verification report. Deferred: schemas/index creation, job/rider CRUD, ranking implementation, reservations, worker, seed jobs/riders, real dashboard, final presentation. The next feature is **domain models, database constraints and transaction verification**, subject to Phase 1 review.
+
+## Phase 2 checkpoint
+
+Completed on `feat/domain-models` after Phase 1 approval: focused code comments; pure job/attempt transitions and expiry/counter rules; four schemas and their indexes; typed audit/snapshot payloads and append-only model guards; replica-set/index/transaction readiness; real MongoDB integration tests. All changes use genuine commits. No job-management or later feature APIs are included. Next branch: `feat/job-management` after Phase 2 review. See `phase-2-report.md` for actual verification and limitations.
