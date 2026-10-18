@@ -10,6 +10,8 @@ import {
 } from '../../src/modules/persistence/models.js';
 import { initializePersistence } from '../../src/modules/persistence/initialize.js';
 import { startTestReplicaSet } from '../helpers/mongo.js';
+import { assignmentFixture } from '../helpers/fixtures.js';
+import { appendJobEvent } from '../../src/modules/history/append-event.js';
 
 let replica: MongoMemoryReplSet;
 let connection: Connection;
@@ -261,5 +263,264 @@ describe('job HTTP validation and dependency behavior', () => {
       .send(payload());
     expect(res.status).toBe(503);
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+const markReady = (id: string) =>
+  request(app).post(`/api/v1/jobs/${id}/ready`).set('X-Actor-Id', 'dispatcher:meena').send({});
+
+describe('job retrieval and filtered operational lists', () => {
+  it('returns an empty queue with bounded default pagination', async () => {
+    const res = await request(app).get('/api/v1/jobs');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ data: [], pagination: { page: 1, pageSize: 20, total: 0 } });
+  });
+  it('retrieves the current job without leaking storage fields', async () => {
+    const created = await create(payload(), 'private-key');
+    const res = await request(app).get(`/api/v1/jobs/${created.body.data.id}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual(created.body.data);
+    expect(JSON.stringify(res.body)).not.toMatch(/requestHash|creationKey|eventSequence|__v/);
+  });
+  it('filters by pickup OR delivery zone and combines the status filter', async () => {
+    const a = await create(
+      payload({ orderReference: 'A', pickupZone: 'CENTRAL', deliveryZone: 'NORTH' }),
+    );
+    await create(payload({ orderReference: 'B', pickupZone: 'NORTH', deliveryZone: 'SOUTH' }));
+    await create(payload({ orderReference: 'C', pickupZone: 'EAST', deliveryZone: 'WEST' }));
+    await markReady(a.body.data.id);
+    const bothSides = await request(app).get('/api/v1/jobs?zone=north');
+    expect(bothSides.body.data.map((j: { orderReference: string }) => j.orderReference)).toEqual([
+      'A',
+      'B',
+    ]);
+    expect(bothSides.body.pagination.total).toBe(2);
+    const ready = await request(app).get('/api/v1/jobs?zone=NORTH&status=READY_FOR_ASSIGNMENT');
+    expect(ready.body.data.map((j: { orderReference: string }) => j.orderReference)).toEqual(['A']);
+    expect(ready.body.pagination.total).toBe(1);
+  });
+  it('searches the exact normalized reference without interpreting regex characters', async () => {
+    await create(payload({ orderReference: 'RELAY-1001' }));
+    await create(payload({ orderReference: 'RELAY-10012' }));
+    const exact = await request(app).get('/api/v1/jobs').query({ orderReference: ' relay-1001 ' });
+    expect(exact.body.data).toHaveLength(1);
+    expect(exact.body.data[0].orderReference).toBe('RELAY-1001');
+    const literal = await request(app).get('/api/v1/jobs').query({ orderReference: 'RELAY-.*' });
+    expect(literal.body.data).toEqual([]);
+  });
+  it('paginates deterministically when jobs share the same creation timestamp', async () => {
+    const ids = [];
+    for (const reference of ['FIRST', 'SECOND', 'THIRD'])
+      ids.push((await create(payload({ orderReference: reference }))).body.data.id);
+    const first = await request(app).get('/api/v1/jobs?page=1&pageSize=2');
+    const second = await request(app).get('/api/v1/jobs?page=2&pageSize=2');
+    expect(first.body.data.map((j: { id: string }) => j.id)).toEqual(ids.slice(0, 2));
+    expect(second.body.data.map((j: { id: string }) => j.id)).toEqual(ids.slice(2));
+    expect(second.body.pagination).toEqual({ page: 2, pageSize: 2, total: 3 });
+    const beyond = await request(app).get('/api/v1/jobs?page=3&pageSize=2');
+    expect(beyond.body.data).toEqual([]);
+    expect(beyond.body.pagination.total).toBe(3);
+  });
+  it.each([
+    'page=0',
+    'pageSize=101',
+    'status=UNKNOWN',
+    'zone=UNKNOWN',
+    'status=NEW&status=CANCELLED',
+    'status[$ne]=NEW',
+    'unknown=ignored',
+  ])('rejects invalid query %s', async (query) => {
+    const res = await request(app).get(`/api/v1/jobs?${query}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+  it.each(['/api/v1/jobs/not-an-id', '/api/v1/jobs/not-an-id/history'])(
+    'rejects malformed ID at %s',
+    async (path) => {
+      expect((await request(app).get(path)).status).toBe(400);
+    },
+  );
+  it.each(['', '/history'])('returns meaningful 404 for a missing valid job%s', async (suffix) => {
+    const res = await request(app).get(`/api/v1/jobs/507f191e810c19729de860ea${suffix}`);
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('JOB_NOT_FOUND');
+  });
+});
+
+describe('guarded ready command and transactional audit', () => {
+  it('moves NEW to ready with one ordered event, actor and version increment', async () => {
+    const created = await create();
+    now = new Date('2030-01-01T09:05:00Z');
+    const res = await markReady(created.body.data.id);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      replayed: false,
+      data: { status: 'READY_FOR_ASSIGNMENT', version: 1, updatedAt: now.toISOString() },
+    });
+    const stored = await models.Job.findById(created.body.data.id).orFail();
+    expect(stored.eventSequence).toBe(2);
+    const history = await request(app).get(`/api/v1/jobs/${stored._id}/history`);
+    expect(history.status).toBe(200);
+    expect(history.body.data.events.map((e: { type: string }) => e.type)).toEqual([
+      'JOB_CREATED',
+      'JOB_READY',
+    ]);
+    expect(history.body.data.events[1]).toMatchObject({
+      sequence: 2,
+      actor: 'dispatcher:meena',
+      occurredAt: now.toISOString(),
+      details: { from: 'NEW', to: 'READY_FOR_ASSIGNMENT' },
+    });
+    expect(history.body.data.attempts).toEqual([]);
+  });
+  it('replays an already-ready command without another event or version increment', async () => {
+    const id = (await create()).body.data.id;
+    await markReady(id);
+    const replay = await markReady(id);
+    expect(replay.status).toBe(200);
+    expect(replay.body.replayed).toBe(true);
+    expect(replay.body.data.version).toBe(1);
+    expect(await models.JobEvent.countDocuments()).toBe(2);
+  });
+  it('replays creation after ready without resetting current state', async () => {
+    const id = (await create(payload(), 'create-key')).body.data.id;
+    await markReady(id);
+    const replay = await create(payload(), 'create-key');
+    expect(replay.status).toBe(200);
+    expect(replay.body.data).toMatchObject({ id, status: 'READY_FOR_ASSIGNMENT', version: 1 });
+    expect(await models.JobEvent.countDocuments()).toBe(2);
+  });
+  it('allows only one effective ready transition when eight dispatchers race', async () => {
+    const id = (await create()).body.data.id;
+    const replies = await Promise.all(Array.from({ length: 8 }, () => markReady(id)));
+    expect(replies.every((r) => r.status === 200)).toBe(true);
+    expect(replies.filter((r) => r.body.replayed === false)).toHaveLength(1);
+    expect(replies.every((r) => r.body.data.version === 1)).toBe(true);
+    expect(await models.JobEvent.countDocuments()).toBe(2);
+    expect((await models.Job.findById(id).orFail()).eventSequence).toBe(2);
+  });
+  it.each(['CANCELLED', 'DELIVERED', 'MANUAL_QUEUE'] as const)(
+    'refuses resetting %s work to ready',
+    async (status) => {
+      const id = (await create()).body.data.id;
+      // Fixture-only state setup: the corresponding lifecycle APIs do not exist yet.
+      await models.Job.collection.updateOne(
+        { _id: new mongoose.Types.ObjectId(id) },
+        {
+          $set: {
+            status,
+            ...(status === 'MANUAL_QUEUE' ? { manualReason: 'NO_ELIGIBLE_RIDER' } : {}),
+          },
+        },
+      );
+      const res = await markReady(id);
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('INVALID_TRANSITION');
+      expect(await models.JobEvent.countDocuments()).toBe(1);
+      expect((await models.Job.findById(id).orFail()).status).toBe(status);
+    },
+  );
+  it('rolls back ready status, version and sequence if its audit insert fails', async () => {
+    const id = (await create()).body.data.id;
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.spyOn(models.JobEvent, 'create').mockRejectedValueOnce(
+      new Error('injected ready audit failure'),
+    );
+    const res = await markReady(id);
+    expect(res.status).toBe(500);
+    const unchanged = await models.Job.findById(id).orFail();
+    expect(unchanged).toMatchObject({ status: 'NEW', version: 0, eventSequence: 1 });
+    expect(await models.JobEvent.countDocuments()).toBe(1);
+    log.mockRestore();
+    expect((await markReady(id)).body.data.version).toBe(1);
+    expect(await models.JobEvent.countDocuments()).toBe(2);
+  });
+  it('recovers a lost ready-commit response through a harmless client retry', async () => {
+    const id = (await create()).body.data.id;
+    const original = connection.transaction.bind(connection);
+    vi.spyOn(connection, 'transaction').mockImplementationOnce(async (work, options) => {
+      await original(work, options);
+      throw new mongoose.mongo.MongoServerError({
+        message: 'simulated lost ready commit reply',
+        errorLabels: ['UnknownTransactionCommitResult'],
+      });
+    });
+    expect((await markReady(id)).status).toBe(503);
+    const retry = await markReady(id);
+    expect(retry.status).toBe(200);
+    expect(retry.body.replayed).toBe(true);
+    expect(await models.JobEvent.countDocuments()).toBe(2);
+  });
+  it('requires actor, empty body and a valid/existing target', async () => {
+    const id = (await create()).body.data.id;
+    expect((await request(app).post(`/api/v1/jobs/${id}/ready`).send({})).status).toBe(400);
+    expect(
+      (
+        await request(app)
+          .post(`/api/v1/jobs/${id}/ready`)
+          .set('X-Actor-Id', 'dispatcher:test')
+          .send({ status: 'DELIVERED' })
+      ).status,
+    ).toBe(400);
+    expect((await markReady('invalid')).status).toBe(400);
+    expect((await markReady('507f191e810c19729de860ea')).status).toBe(404);
+    expect((await models.Job.findById(id).orFail()).status).toBe('NEW');
+  });
+  it('refuses an audit append outside a transaction without allocating a sequence', async () => {
+    const id = (await create()).body.data.id;
+    const session = await connection.startSession();
+    try {
+      await expect(
+        appendJobEvent(models, session, {
+          jobId: new mongoose.Types.ObjectId(id),
+          type: 'JOB_READY',
+          actor: 'dispatcher:test',
+          occurredAt: now,
+          details: { from: 'NEW', to: 'READY_FOR_ASSIGNMENT' },
+        }),
+      ).rejects.toThrow('active transaction');
+    } finally {
+      await session.endSession();
+    }
+    expect((await models.Job.findById(id).orFail()).eventSequence).toBe(1);
+  });
+});
+
+describe('bounded chronological job history', () => {
+  it('paginates events with totals and retains fixture attempts without exposing command keys', async () => {
+    const id = (await create()).body.data.id;
+    await markReady(id);
+    const jobId = new mongoose.Types.ObjectId(id);
+    const failed = {
+      status: 'EXPIRED',
+      active: false,
+      endReason: 'RESPONSE_TIMEOUT',
+      endedAt: new Date('2030-01-01T11:00:00Z'),
+      reservationReleasedAt: new Date('2030-01-01T11:00:00Z'),
+    };
+    await models.Assignment.create(assignmentFixture(jobId, failed));
+    await models.Assignment.create(assignmentFixture(jobId, failed));
+    await models.Assignment.create(assignmentFixture(jobId));
+    const page1 = await request(app).get(`/api/v1/jobs/${id}/history?page=1&pageSize=1`);
+    const page2 = await request(app).get(`/api/v1/jobs/${id}/history?page=2&pageSize=1`);
+    expect(page1.body.data.events[0].sequence).toBe(1);
+    expect(page2.body.data.events[0].sequence).toBe(2);
+    expect(page1.body.pagination).toEqual({ page: 1, pageSize: 1, total: 2 });
+    expect(page1.body.attemptsPagination).toEqual({ page: 1, pageSize: 1, total: 3 });
+    expect(page1.body.data.attempts).toHaveLength(1);
+    expect(page1.body.data.attempts[0].status).toBe('EXPIRED');
+    expect(JSON.stringify(page1.body)).not.toMatch(/requestHash|requestKey|creationKey/);
+    expect((await request(app).get(`/api/v1/jobs/${id}/history`)).body.data.attempts).toHaveLength(
+      3,
+    );
+  });
+  it('rejects invalid pagination and provides no audit edit/delete route', async () => {
+    const id = (await create()).body.data.id;
+    expect((await request(app).get(`/api/v1/jobs/${id}/history?pageSize=101`)).status).toBe(400);
+    expect(
+      (await request(app).patch(`/api/v1/jobs/${id}/history`).send({ actor: 'changed' })).status,
+    ).toBe(404);
+    expect((await request(app).delete(`/api/v1/jobs/${id}/history`)).status).toBe(404);
+    expect(await models.JobEvent.countDocuments()).toBe(1);
   });
 });

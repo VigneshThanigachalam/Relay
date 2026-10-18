@@ -1,11 +1,22 @@
-import type { ClientSession, Connection, HydratedDocument } from 'mongoose';
+import {
+  Types,
+  type ClientSession,
+  type Connection,
+  type FilterQuery,
+  type HydratedDocument,
+} from 'mongoose';
 import { ApiError } from '../../http/api-error.js';
-import { systemClock, type Clock } from '../domain/lifecycle.js';
+import { systemClock, transitionJob, type Clock } from '../domain/lifecycle.js';
 import { appendJobEvent } from '../history/append-event.js';
 import type { JobRecord, PersistenceModels } from '../persistence/models.js';
 import { runInTransaction } from '../persistence/transaction.js';
-import { hashJobRequest, type CreateJobInput } from './contracts.js';
-import { jobDto } from './dto.js';
+import {
+  hashJobRequest,
+  type CreateJobInput,
+  type ListJobsInput,
+  type Pagination,
+} from './contracts.js';
+import { attemptDto, eventDto, jobDto } from './dto.js';
 
 type JobDocument = HydratedDocument<JobRecord>;
 type Dependencies = { connection: Connection; models: PersistenceModels; clock?: Clock };
@@ -122,6 +133,101 @@ export function createJobsService({ connection, models, clock = systemClock }: D
     }
   }
 
-  return { create };
+  async function detail(id: string) {
+    const job = await models.Job.findById(id).maxTimeMS(5000).lean();
+    if (!job) throw new ApiError(404, 'JOB_NOT_FOUND', 'Job not found');
+    return { data: jobDto(job) };
+  }
+
+  async function list(input: ListJobsInput) {
+    const filter: FilterQuery<JobRecord> = {};
+    if (input.orderReference) filter.orderReference = input.orderReference;
+    if (input.status) filter.status = input.status;
+    if (input.zone) filter.$or = [{ pickupZone: input.zone }, { deliveryZone: input.zone }];
+    return runInTransaction(connection, async (session) => {
+      // Data and total describe one database snapshot even if another dispatcher
+      // creates work concurrently. Pagination still changes between requests.
+      const total = await models.Job.countDocuments(filter).session(session).maxTimeMS(5000);
+      const jobs = await models.Job.find(filter)
+        .sort({ createdAt: 1, _id: 1 })
+        .skip((input.page - 1) * input.pageSize)
+        .limit(input.pageSize)
+        .session(session)
+        .maxTimeMS(5000)
+        .lean();
+      return {
+        data: jobs.map(jobDto),
+        pagination: { page: input.page, pageSize: input.pageSize, total },
+      };
+    });
+  }
+
+  async function ready(id: string, actor: string) {
+    return runInTransaction(connection, async (session) => {
+      const job = await models.Job.findById(id).session(session).maxTimeMS(5000);
+      if (!job) throw new ApiError(404, 'JOB_NOT_FOUND', 'Job not found');
+      if (job.status === 'READY_FOR_ASSIGNMENT') return { data: jobDto(job), replayed: true };
+      const next = transitionJob(job.status, 'ready');
+      const now = clock.now();
+      // The transition table describes legality; this predicate protects the
+      // actual stored state/version. A stale in-memory read is not a lock.
+      const updated = await models.Job.findOneAndUpdate(
+        { _id: job._id, status: 'NEW', version: job.version },
+        { $set: { status: next, updatedAt: now }, $inc: { version: 1 } },
+        { new: true, session, runValidators: true, timestamps: false },
+      ).maxTimeMS(5000);
+      if (!updated) throw new ApiError(409, 'STATE_CONFLICT', 'Job changed; refresh and retry');
+      await appendJobEvent(models, session, {
+        jobId: job._id,
+        type: 'JOB_READY',
+        actor,
+        occurredAt: now,
+        details: { from: job.status, to: next },
+      });
+      return { data: jobDto(updated), replayed: false };
+    });
+  }
+
+  async function history(id: string, input: Pagination) {
+    return runInTransaction(connection, async (session) => {
+      const jobId = new Types.ObjectId(id);
+      const job = await models.Job.findById(jobId)
+        .select('_id')
+        .session(session)
+        .maxTimeMS(5000)
+        .lean();
+      if (!job) throw new ApiError(404, 'JOB_NOT_FOUND', 'Job not found');
+      const skip = (input.page - 1) * input.pageSize;
+      const total = await models.JobEvent.countDocuments({ jobId })
+        .session(session)
+        .maxTimeMS(5000);
+      const events = await models.JobEvent.find({ jobId })
+        .sort({ sequence: 1 })
+        .skip(skip)
+        .limit(input.pageSize)
+        .session(session)
+        .maxTimeMS(5000)
+        .lean();
+      const attemptsTotal = await models.Assignment.countDocuments({ jobId })
+        .session(session)
+        .maxTimeMS(5000);
+      const attempts = await models.Assignment.find({ jobId })
+        .sort({ assignedAt: 1, _id: 1 })
+        .skip(skip)
+        .limit(input.pageSize)
+        .session(session)
+        .maxTimeMS(5000)
+        .lean();
+      // Bound both arrays: retaining history must not turn this endpoint into an
+      // unbounded response as failed assignment attempts accumulate later.
+      return {
+        data: { events: events.map(eventDto), attempts: attempts.map(attemptDto) },
+        pagination: { page: input.page, pageSize: input.pageSize, total },
+        attemptsPagination: { page: input.page, pageSize: input.pageSize, total: attemptsTotal },
+      };
+    });
+  }
+
+  return { create, detail, list, ready, history };
 }
 export type JobsService = ReturnType<typeof createJobsService>;
