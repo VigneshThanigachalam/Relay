@@ -1,6 +1,6 @@
 # System design proposal
 
-Implemented through Phase 2: domain rules, four Mongoose schemas, named indexes, audit mutation guards, the transaction helper and verified replica-set startup. The dispatch services, recommendation algorithm, worker and operational UI described below remain planned. The stack follows the user's specification. The assignment itself permits tool choice. [Lifecycle](lifecycle.md), [API contract](api-contract.md) and [requirements](requirements.md) define the remaining behavior.
+Implemented through Phase 3: domain/database foundation plus jobs service/router, canonical request hashing, creation replay/conflicts, filtered snapshot reads, detail/history and guarded mark-ready. Job creation and ready events share their state transaction. Rider/assignment services, recommendation algorithm, worker and operational UI described below remain planned. The stack follows the user's specification. The assignment itself permits tool choice. [Lifecycle](lifecycle.md), [API contract](api-contract.md) and [requirements](requirements.md) define the remaining behavior.
 
 ## Components and responsibilities
 
@@ -107,3 +107,11 @@ Official references checked during Phase 1: [MongoDB transactions](https://www.m
 Schemas and the model factory live in `apps/api/src/modules/persistence/models.ts`; pure policies and typed Zod audit payloads live in `modules/domain`. Schema validators protect document creation/save; strict mode rejects unknown fields and immutable identity/load edits. Audit guards cover save, query/document update/delete, replacement, bulk writes and lean insertMany validation bypass. Raw collection access or a privileged administrator can bypass Mongoose guards; tests use raw deletion only for disposable fixture cleanup.
 
 Mongoose does not enforce foreign keys, historical transitions, or cross-document counter equality. Query updates do not execute document pre-validation hooks. The future dispatch services must implement the guarded predicates and transaction boundaries in the risk table; Phase 2 verifies the infrastructure, not those unimplemented services. The temporary real-MongoDB harness verifies active-attempt indexes for pending, accepted and picked-up records and four-record rollback. Docker and production replication/permissions remain unverified.
+
+## Phase 3 job implementation
+
+`modules/jobs/contracts.ts` validates and canonicalizes requests; `router.ts` handles HTTP parsing/status; `service.ts` owns transactions, queries, replay and guarded transitions; `dto.ts` explicitly excludes private hashes/keys. `modules/history/append-event.ts` requires an active session, increments the job event counter and inserts the typed event in the same transaction. It does not increment the state version; the ready state mutation increments that separately. Failed audit storage rolls both back.
+
+Creation checks a durable key first, then the normalized reference; conflicting key ownership takes precedence. The canonical hash makes explicit defaults/ISO offsets equivalent. A different key on an existing reference is rejected, avoiding unbound key reuse without adding another collection. Duplicate-key recovery runs after the aborted transaction, using only job identity indexes; audit-index conflicts are not swallowed. Unknown creation commit results are reconciled by a majority read; unresolved outcomes return 503 and callers retry the same request. Ready retries rely on the stored current state. Read-only lists/history use sequential snapshot queries for consistent pagination totals within each response and have bounded page sizes/query timeouts. This adds transaction overhead to reads, an acceptable small-application trade-off.
+
+See job-api.md and phase-3-report.md for the tested scope. These job concurrency checks do not prove assignment reservation or release-once behavior, which remains a later feature.

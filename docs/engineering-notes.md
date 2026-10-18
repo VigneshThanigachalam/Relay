@@ -4,7 +4,7 @@
 
 Phase 2 implements domain status/transition rules, expiry boundaries, rider-counter invariants, Job/Rider/Assignment/JobEvent schemas, named indexes, type-specific audit payload validation, append-only model guards, explicit persistence initialization and a transaction helper. Focused comments explain safety/consistency decisions. Real MongoDB integration checks verify these foundations.
 
-There are still no job/rider business routes, ranking implementation, capacity-reservation service, actual timeout worker, public seed command, operational dashboard or final one-page presentation. Transaction infrastructure tests do not prove full dispatch workflows. See the requirements checklist and both phase reports for evidence.
+Phase 3 now implements job create/list/detail/ready/history routes, canonical hashing and durable replay, guarded ready updates and transactional audit-sequence allocation. Real HTTP tests cover races, rollback, validation and unknown-commit recovery. There are still no rider routes, ranking implementation, capacity-reservation service, actual timeout worker, public seed command, operational dashboard or final one-page presentation. Transaction infrastructure tests do not prove full dispatch workflows. See the requirements checklist and the phase reports for evidence.
 
 ## Assumptions
 
@@ -16,7 +16,7 @@ Idempotency is a single-operation contract with stored hashes, not a process-mem
 
 A development-only harness now downloads and starts actual MongoDB 8.0.17 processes, including a single-node replica set. Real index constraints, transaction commit/rollback and refusal of standalone MongoDB are verified. The initial default socket startup failed with an operation-not-permitted error; the TCP-only harness runs successfully without elevated permissions. Docker remains unavailable and the compose recipe remains unexecuted. No browser visual walkthrough or full seeded workflow has been performed. There is no remote Git repository configured.
 
-Schema pre-validation hooks run for document creation/save, not arbitrary query updates. Mongoose guards are not database permissions. Foreign keys, request replay semantics, audit-sequence allocation and cross-document counter equality require the later service implementations. Database-level unique indexes protect the specific uniqueness rules now; tests do not claim full concurrent assignment or release-once behavior.
+Schema pre-validation hooks run for document creation/save, not arbitrary query updates. Mongoose guards are not database permissions. Job creation replay and audit-sequence allocation are implemented. Foreign-key validation for dispatch, assignment request replay and cross-document reservation counter equality still require their later services. Database-level unique indexes protect the specific uniqueness rules now; tests do not claim full concurrent assignment or release-once behavior.
 
 The test suite needs a first-run binary download (roughly 100 MB) or a configured local test binary. It creates and removes temporary fixture-owned data and never uses a user-configured production URI. No mocked or silently skipped database tests are counted as real integration coverage.
 
@@ -27,3 +27,9 @@ Application append-only audit prevents edits through supported APIs, not a privi
 1. Add authenticated dispatcher/rider roles with authorization, stronger actor provenance and restricted database roles for audit retention.
 2. Add monitoring for pending age, worker lag and counter invariant drift, plus a tested reconciliation tool and robust deployment/backup procedures.
 3. Improve travel estimates and operational exceptions (post-pickup failure/returns), using observed dispatch outcomes to tune scoring and deadline risk.
+
+## Job API policies and limits
+
+A job stores the optional creation key from its first successful creation. Retries reuse it or omit it for reference-based replay; a newly supplied different key on an existing job conflicts. This avoids a second key-receipt collection while keeping accepted keys durable. Defaults and equivalent timestamp offsets are canonicalized before hashing. Replay checks run before the future-deadline rule and return current state. A ready retry only replays while the job is still READY; it cannot reset assigned or terminal work.
+
+Job list/history reads use snapshot transactions; this is simple and consistent but adds read overhead. Lists use offset pagination capped at page 10000 and size 100; queue membership can change across requests. Events and attempts use the same requested page/size but expose separate totals. Actor headers are simulated identity, not verified authorization. GET requests do not generate audit events. Failed input/replayed requests do not generate duplicate lifecycle events. Fault-injection tests wrap real database operations to test rollback and uncertain replies; they do not claim a real network partition or replica failover was performed.
