@@ -1,14 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import { errorHandler, sendError } from './http/errors.js';
+import { createJobsRouter } from './modules/jobs/router.js';
+import type { JobsService } from './modules/jobs/service.js';
 
-type AppDependencies = { isReady?: () => boolean };
+type AppDependencies = { isReady?: () => boolean; jobs?: JobsService };
 
-export function createApp({ isReady = () => false }: AppDependencies = {}) {
+export function createApp({ isReady = () => false, jobs }: AppDependencies = {}) {
   // Building the app must not open sockets or connect to MongoDB: Supertest can
   // exercise HTTP contracts while server.ts owns the real process lifecycle.
   const app = express();
   app.disable('x-powered-by');
+  app.set('query parser', 'simple');
   app.use((_req, res, next) => {
     res.locals.requestId = randomUUID();
     res.setHeader('X-Request-Id', res.locals.requestId as string);
@@ -29,6 +32,19 @@ export function createApp({ isReady = () => false }: AppDependencies = {}) {
     }
     res.json({ data: { status: 'ready' } });
   });
+  if (jobs) {
+    app.use(
+      '/api/v1/jobs',
+      (req, res, next) => {
+        if (!isReady()) {
+          sendError(req, res, 503, 'DEPENDENCY_UNAVAILABLE', 'Database is not ready');
+          return;
+        }
+        next();
+      },
+      createJobsRouter(jobs),
+    );
+  }
   app.use((req, res) => {
     sendError(req, res, 404, 'ROUTE_NOT_FOUND', 'Route not found');
   });

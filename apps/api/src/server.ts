@@ -1,3 +1,6 @@
+import mongoose from 'mongoose';
+import { createJobsService } from './modules/jobs/service.js';
+import { createPersistenceModels } from './modules/persistence/models.js';
 import { createApp } from './app.js';
 import { parseEnv } from './config/env.js';
 import { connectDatabase, disconnectDatabase, isDatabaseReady } from './infrastructure/database.js';
@@ -7,7 +10,11 @@ async function start() {
   // Fail before listening when persistence is unavailable. A successful HTTP
   // startup must never imply that we silently switched to in-memory storage.
   await connectDatabase(config.MONGODB_URI);
-  const server = createApp({ isReady: isDatabaseReady }).listen(config.PORT, () => {
+  const jobs = createJobsService({
+    connection: mongoose.connection,
+    models: createPersistenceModels(mongoose.connection),
+  });
+  const server = createApp({ isReady: isDatabaseReady, jobs }).listen(config.PORT, () => {
     console.info(`RELAY API listening on port ${config.PORT}`);
   });
   server.on('error', () => {

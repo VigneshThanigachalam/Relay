@@ -27,7 +27,7 @@ describe('HTTP foundation (no database)', () => {
     expect((await request(app).get('/health/ready')).status).toBe(503);
   });
 
-  it('returns a consistent not-found error for unimplemented business routes', async () => {
+  it('does not register business routes without injected services', async () => {
     const result = await request(createApp()).get('/api/v1/jobs');
     expect(result.status).toBe(404);
     expect(result.body.error).toEqual({ code: 'ROUTE_NOT_FOUND', message: 'Route not found' });
