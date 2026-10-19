@@ -6,6 +6,7 @@ import { createDispatchService } from './modules/dispatch/service.js';
 import { createResolutionService } from './modules/dispatch/resolution.js';
 import { createTimeoutScanner } from './modules/worker/timeout-scanner.js';
 import { startTimeoutWorker } from './modules/worker/timeout-worker.js';
+import { createManualQueueService } from './modules/manual-queue/service.js';
 import { createPersistenceModels } from './modules/persistence/models.js';
 import { createApp } from './app.js';
 import { parseEnv } from './config/env.js';
@@ -26,6 +27,7 @@ async function start() {
     responseThresholdMs: config.ASSIGNMENT_RESPONSE_THRESHOLD_MS,
   });
   const resolution = createResolutionService({ connection: mongoose.connection, models });
+  const manualQueue = createManualQueueService({ connection: mongoose.connection, models });
   const scanner = createTimeoutScanner({ models, resolution });
   let worker: ReturnType<typeof startTimeoutWorker> | undefined;
   let stopping = false;
@@ -36,6 +38,7 @@ async function start() {
     recommendations,
     dispatch,
     resolution,
+    manualQueue,
   }).listen(config.PORT, () => {
     if (!stopping)
       worker = startTimeoutWorker({

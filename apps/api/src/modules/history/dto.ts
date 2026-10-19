@@ -2,6 +2,10 @@ import type { Types } from 'mongoose';
 import type { AssignmentRecord, JobEventRecord } from '../persistence/models.js';
 
 type Stored<T> = T & { _id: Types.ObjectId };
+type AttemptSummaryRecord = Omit<
+  AssignmentRecord,
+  'recommendationSnapshot' | 'requestKey' | 'requestHash' | 'createdAt' | 'updatedAt'
+>;
 
 // Both job history and rider workload use the same safe public attempt shape.
 export function eventDto(event: Stored<JobEventRecord>) {
@@ -16,7 +20,7 @@ export function eventDto(event: Stored<JobEventRecord>) {
     details: event.details,
   };
 }
-export function attemptDto(attempt: Stored<AssignmentRecord>) {
+export function attemptSummaryDto(attempt: Stored<AttemptSummaryRecord>) {
   return {
     id: attempt._id.toHexString(),
     jobId: attempt.jobId.toHexString(),
@@ -32,6 +36,8 @@ export function attemptDto(attempt: Stored<AssignmentRecord>) {
     overrideReason: attempt.overrideReason ?? null,
     endReason: attempt.endReason ?? null,
     actor: attempt.actor,
-    recommendationSnapshot: attempt.recommendationSnapshot,
   };
+}
+export function attemptDto(attempt: Stored<AssignmentRecord>) {
+  return { ...attemptSummaryDto(attempt), recommendationSnapshot: attempt.recommendationSnapshot };
 }
