@@ -86,16 +86,13 @@ describe('atomic assignment HTTP workflow', () => {
         capacityUnits: 5,
       });
     expect(rider.status).toBe(201);
-    const job = await request(app)
-      .post('/api/v1/jobs')
-      .set('X-Actor-Id', actor)
-      .send({
-        orderReference: 'ASSIGN-001',
-        pickupZone: 'CENTRAL',
-        deliveryZone: 'NORTH',
-        loadUnits: 2,
-        priority: 'HIGH',
-      });
+    const job = await request(app).post('/api/v1/jobs').set('X-Actor-Id', actor).send({
+      orderReference: 'ASSIGN-001',
+      pickupZone: 'CENTRAL',
+      deliveryZone: 'NORTH',
+      loadUnits: 2,
+      priority: 'HIGH',
+    });
     expect(job.status).toBe(201);
     expect(
       (
@@ -489,6 +486,286 @@ describe('invalid states, validation and rollback', () => {
     expect(res.body.error.code).toBe('DEPENDENCY_UNAVAILABLE');
     expect(await models.JobEvent.countDocuments()).toBe(0);
     expect(await models.Assignment.countDocuments()).toBe(0);
+    await assertWorkload(rider.id);
+  });
+});
+
+describe('real concurrent reservation requests', () => {
+  it('allows one of eight dispatchers with different keys to assign a job and audits every loser', async () => {
+    const { job, rider } = await seed();
+    const responses = await Promise.all(
+      Array.from({ length: 8 }, (_, i) => assign(job.id, rider.id, `dispatcher-${i}`)),
+    );
+    expect(responses.filter((r) => r.status === 201)).toHaveLength(1);
+    expect(
+      responses.filter((r) => r.status === 409 && r.body.error.code === 'JOB_ALREADY_ASSIGNED'),
+    ).toHaveLength(7);
+    expect(await models.Assignment.countDocuments({ jobId: job.id, active: true })).toBe(1);
+    expect(await models.JobEvent.countDocuments({ type: 'ASSIGNMENT_FAILED' })).toBe(7);
+    const events = await models.JobEvent.find({ jobId: job.id }).sort({ sequence: 1 }).lean();
+    expect(events.map((e) => e.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect((await models.Job.findById(job.id).orFail()).version).toBe(1);
+    await assertWorkload(rider.id);
+  });
+  it('replays seven of eight concurrent identical commands without extra reservations or audit events', async () => {
+    const { job, rider } = await seed();
+    const responses = await Promise.all(Array.from({ length: 8 }, () => assign(job.id, rider.id)));
+    expect(responses.filter((r) => r.status === 201)).toHaveLength(1);
+    expect(responses.filter((r) => r.status === 200 && r.body.replayed)).toHaveLength(7);
+    expect(new Set(responses.map((r) => r.body.data.assignment.id)).size).toBe(1);
+    expect(await models.Assignment.countDocuments()).toBe(1);
+    expect(await models.JobEvent.countDocuments()).toBe(2);
+    await assertWorkload(rider.id);
+  });
+  it('cannot reserve more than a rider can carry across six competing jobs', async () => {
+    const { job, rider } = await seed({ capacityUnits: 4 });
+    const jobs = [
+      job,
+      ...(await models.Job.create(
+        Array.from({ length: 5 }, () => jobFixture({ status: 'READY_FOR_ASSIGNMENT' })),
+      )),
+    ];
+    const responses = await Promise.all(
+      jobs.map((item, i) => assign(item.id, rider.id, `job-${i}`)),
+    );
+    expect(responses.filter((r) => r.status === 201)).toHaveLength(2);
+    expect(
+      responses.filter((r) => r.status === 409 && r.body.error.code === 'RIDER_INELIGIBLE'),
+    ).toHaveLength(4);
+    expect(await models.Assignment.countDocuments({ active: true })).toBe(2);
+    expect(await models.Job.countDocuments({ status: 'AWAITING_CONFIRMATION' })).toBe(2);
+    expect(await models.Job.countDocuments({ status: 'READY_FOR_ASSIGNMENT' })).toBe(4);
+    expect((await models.Rider.findById(rider.id).orFail()).reservedUnits).toBe(4);
+    await assertWorkload(rider.id);
+  });
+  it('binds a concurrently reused key to exactly one payload and one rider', async () => {
+    const { job, rider } = await seed({ code: 'R-001' });
+    const other = await models.Rider.create(riderFixture({ code: 'R-002' }));
+    const responses = await Promise.all([
+      assign(job.id, rider.id, 'shared-key', 'Operational choice'),
+      assign(job.id, other.id, 'shared-key', 'Operational choice'),
+    ]);
+    expect(responses.filter((r) => r.status === 201)).toHaveLength(1);
+    expect(
+      responses.filter((r) => r.status === 409 && r.body.error.code === 'IDEMPOTENCY_CONFLICT'),
+    ).toHaveLength(1);
+    expect(await models.Assignment.countDocuments()).toBe(1);
+    await assertWorkload(rider.id);
+    await assertWorkload(other.id);
+  });
+});
+
+function barrier() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+describe('stale eligibility and configuration conflicts', () => {
+  it.each([{ availability: 'UNAVAILABLE' }, { capacityUnits: 1 }, { serviceZones: ['CENTRAL'] }])(
+    'rechecks eligibility when a public configuration patch %j commits before reservation',
+    async (change) => {
+      const { job, rider } = await seed();
+      const reached = barrier();
+      const resume = barrier();
+      const original = models.Rider.collection.updateOne.bind(models.Rider.collection);
+      const gate = vi
+        .spyOn(models.Rider.collection, 'updateOne')
+        .mockImplementationOnce(async (...args) => {
+          reached.release();
+          await resume.promise;
+          return original(...args);
+        });
+      const pending = assign(job.id, rider.id).then((res) => res);
+      try {
+        await reached.promise;
+        const patch = await request(app)
+          .patch(`/api/v1/riders/${rider.id}`)
+          .set('X-Actor-Id', actor)
+          .send(change);
+        expect(patch.status).toBe(200);
+        resume.release();
+        const res = await pending;
+        expect(res.status).toBe(409);
+        expect(res.body.error.code).toBe('RIDER_INELIGIBLE');
+        expect(await models.Assignment.countDocuments()).toBe(0);
+        expect((await models.Job.findById(job.id).orFail()).status).toBe('READY_FOR_ASSIGNMENT');
+        expect(await models.JobEvent.countDocuments({ type: 'ASSIGNMENT_FAILED' })).toBe(1);
+        await assertWorkload(rider.id);
+      } finally {
+        resume.release();
+        gate.mockRestore();
+        await pending;
+      }
+    },
+  );
+  it.each([
+    { change: { capacityUnits: 1 }, code: 'CAPACITY_CONFLICT' },
+    { change: { serviceZones: ['CENTRAL'] }, code: 'ACTIVE_ZONE_CONFLICT' },
+  ])(
+    'rechecks a stale public rider edit after actual reservation wins: $code',
+    async ({ change, code }) => {
+      const { job, rider } = await seed();
+      const reached = barrier();
+      const resume = barrier();
+      const original = models.Rider.collection.findOneAndUpdate.bind(models.Rider.collection);
+      const gate = vi
+        .spyOn(models.Rider.collection, 'findOneAndUpdate')
+        .mockImplementationOnce(async (...args) => {
+          reached.release();
+          await resume.promise;
+          return original(...args);
+        });
+      const pending = request(app)
+        .patch(`/api/v1/riders/${rider.id}`)
+        .set('X-Actor-Id', actor)
+        .send(change)
+        .then((res) => res);
+      try {
+        await reached.promise;
+        expect((await assign(job.id, rider.id)).status).toBe(201);
+        resume.release();
+        const patch = await pending;
+        expect(patch.status).toBe(409);
+        expect(patch.body.error.code).toBe(code);
+        const stored = await models.Rider.findById(rider.id).orFail();
+        expect(stored.capacityUnits).toBe(5);
+        expect([...stored.serviceZones]).toEqual(['CENTRAL', 'NORTH']);
+        await assertWorkload(rider.id);
+      } finally {
+        resume.release();
+        gate.mockRestore();
+        await pending;
+      }
+    },
+  );
+  it('preserves the actual reservation when a stale offline edit completes afterward', async () => {
+    const { job, rider } = await seed();
+    const reached = barrier();
+    const resume = barrier();
+    const original = models.Rider.collection.findOneAndUpdate.bind(models.Rider.collection);
+    const gate = vi
+      .spyOn(models.Rider.collection, 'findOneAndUpdate')
+      .mockImplementationOnce(async (...args) => {
+        reached.release();
+        await resume.promise;
+        return original(...args);
+      });
+    const pending = request(app)
+      .patch(`/api/v1/riders/${rider.id}`)
+      .set('X-Actor-Id', actor)
+      .send({ availability: 'UNAVAILABLE' })
+      .then((res) => res);
+    try {
+      await reached.promise;
+      expect((await assign(job.id, rider.id)).status).toBe(201);
+      resume.release();
+      const patch = await pending;
+      expect(patch.status).toBe(200);
+      expect(patch.body.data).toMatchObject({
+        availability: 'UNAVAILABLE',
+        reservedUnits: 2,
+        activeJobCount: 1,
+      });
+      await assertWorkload(rider.id);
+    } finally {
+      resume.release();
+      gate.mockRestore();
+      await pending;
+    }
+  });
+});
+
+describe('receipt lifetime and index recovery boundaries', () => {
+  it('replays a terminal attempt fixture with the current manual job without reserving again', async () => {
+    const { job, rider } = await seed();
+    const first = await assign(job.id, rider.id);
+    now = new Date(now.getTime() + 6000);
+    // Controlled atomic outcome fixture; actual expiry/release service is Phase 7.
+    await runInTransaction(connection, async (session) => {
+      await models.Assignment.updateOne(
+        { _id: first.body.data.assignment.id },
+        {
+          $set: {
+            status: 'EXPIRED',
+            active: false,
+            endedAt: now,
+            reservationReleasedAt: now,
+            endReason: 'RESPONSE_TIMEOUT',
+          },
+        },
+        { session },
+      );
+      await models.Rider.updateOne(
+        { _id: rider._id },
+        { $inc: { reservedUnits: -2, activeJobCount: -1 } },
+        { session },
+      );
+      await models.Job.updateOne(
+        { _id: job._id },
+        {
+          $set: { status: 'MANUAL_QUEUE', manualReason: 'RESPONSE_TIMEOUT' },
+          $unset: { activeAssignmentId: '', assignedRiderId: '' },
+          $inc: { version: 1 },
+        },
+        { session },
+      );
+    });
+    const replay = await assign(job.id, rider.id);
+    expect(replay.status).toBe(200);
+    expect(replay.body.data.assignment.id).toBe(first.body.data.assignment.id);
+    expect(replay.body.data.assignment.status).toBe('EXPIRED');
+    expect(replay.body.data.job.status).toBe('MANUAL_QUEUE');
+    expect(await models.Assignment.countDocuments()).toBe(1);
+    expect(await models.JobEvent.countDocuments()).toBe(2);
+    await assertWorkload(rider.id);
+  });
+  it('resolves a command-index collision response by the committed receipt', async () => {
+    const { job, rider } = await seed();
+    const original = connection.transaction.bind(connection);
+    vi.spyOn(connection, 'transaction').mockImplementationOnce(async (work, options) => {
+      await original(work, options);
+      throw new mongoose.mongo.MongoServerError({
+        message: 'command index recovery fixture',
+        code: 11000,
+        keyPattern: { jobId: 1, requestKey: 1 },
+      });
+    });
+    const res = await assign(job.id, rider.id);
+    expect(res.status).toBe(200);
+    expect(res.body.replayed).toBe(true);
+    expect(await models.Assignment.countDocuments()).toBe(1);
+    await assertWorkload(rider.id);
+  });
+  it('does not misclassify an audit-index failure as assignment replay', async () => {
+    const { job, rider } = await seed();
+    vi.spyOn(models.JobEvent.collection, 'insertOne').mockRejectedValueOnce(
+      new mongoose.mongo.MongoServerError({
+        message: 'audit index failure fixture',
+        code: 11000,
+        keyPattern: { jobId: 1, sequence: 1 },
+      }),
+    );
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await assign(job.id, rider.id);
+    expect(res.status).toBe(500);
+    expect(await models.Assignment.countDocuments()).toBe(0);
+    expect(await models.JobEvent.countDocuments()).toBe(0);
+    expect((await models.Job.findById(job.id).orFail()).version).toBe(0);
+    await assertWorkload(rider.id);
+  });
+  it('refuses an inconsistent ready job with a preexisting active attempt', async () => {
+    const { job, rider } = await seed();
+    await models.Assignment.create(assignmentFixture(job._id, { riderId: rider._id }));
+    await models.Rider.updateOne(
+      { _id: rider._id },
+      { $set: { reservedUnits: 2, activeJobCount: 1 } },
+    );
+    const res = await assign(job.id, rider.id);
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('JOB_ALREADY_ASSIGNED');
+    expect(await models.Assignment.countDocuments()).toBe(1);
     await assertWorkload(rider.id);
   });
 });
