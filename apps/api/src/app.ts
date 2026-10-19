@@ -7,12 +7,15 @@ import { createRidersRouter } from './modules/riders/router.js';
 import type { RidersService } from './modules/riders/service.js';
 import { createRecommendationsRouter } from './modules/recommendations/router.js';
 import type { RecommendationsService } from './modules/recommendations/service.js';
+import { createDispatchRouter } from './modules/dispatch/router.js';
+import type { DispatchService } from './modules/dispatch/service.js';
 
 type AppDependencies = {
   isReady?: () => boolean;
   jobs?: JobsService;
   riders?: RidersService;
   recommendations?: RecommendationsService;
+  dispatch?: DispatchService;
 };
 
 export function createApp({
@@ -20,6 +23,7 @@ export function createApp({
   jobs,
   riders,
   recommendations,
+  dispatch,
 }: AppDependencies = {}) {
   // Building the app must not open sockets or connect to MongoDB: Supertest can
   // exercise HTTP contracts while server.ts owns the real process lifecycle.
@@ -57,6 +61,7 @@ export function createApp({
   if (riders) app.use('/api/v1/riders', requireReady, createRidersRouter(riders));
   if (recommendations)
     app.use('/api/v1/jobs', requireReady, createRecommendationsRouter(recommendations));
+  if (dispatch) app.use('/api/v1/jobs', requireReady, createDispatchRouter(dispatch));
   app.use((req, res) => {
     sendError(req, res, 404, 'ROUTE_NOT_FOUND', 'Route not found');
   });

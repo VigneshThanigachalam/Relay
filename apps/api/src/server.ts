@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { createJobsService } from './modules/jobs/service.js';
 import { createRidersService } from './modules/riders/service.js';
 import { createRecommendationsService } from './modules/recommendations/service.js';
+import { createDispatchService } from './modules/dispatch/service.js';
 import { createPersistenceModels } from './modules/persistence/models.js';
 import { createApp } from './app.js';
 import { parseEnv } from './config/env.js';
@@ -16,12 +17,20 @@ async function start() {
   const jobs = createJobsService({ connection: mongoose.connection, models });
   const riders = createRidersService({ connection: mongoose.connection, models });
   const recommendations = createRecommendationsService({ connection: mongoose.connection, models });
-  const server = createApp({ isReady: isDatabaseReady, jobs, riders, recommendations }).listen(
-    config.PORT,
-    () => {
-      console.info(`RELAY API listening on port ${config.PORT}`);
-    },
-  );
+  const dispatch = createDispatchService({
+    connection: mongoose.connection,
+    models,
+    responseThresholdMs: config.ASSIGNMENT_RESPONSE_THRESHOLD_MS,
+  });
+  const server = createApp({
+    isReady: isDatabaseReady,
+    jobs,
+    riders,
+    recommendations,
+    dispatch,
+  }).listen(config.PORT, () => {
+    console.info(`RELAY API listening on port ${config.PORT}`);
+  });
   server.on('error', () => {
     console.error('HTTP server failed to listen');
     void disconnectDatabase().finally(() => {

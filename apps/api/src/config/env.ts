@@ -4,7 +4,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   MONGODB_URI: z.string().regex(/^mongodb(?:\+srv)?:\/\/.+$/, 'Expected a MongoDB connection URI'),
-  // The future assignment service will copy this duration into each attempt's
+  // The assignment service copies this duration into each attempt's
   // expiresAt. Configuration changes must not rewrite deadlines already stored.
   ASSIGNMENT_RESPONSE_THRESHOLD_MS: z.coerce
     .number()
