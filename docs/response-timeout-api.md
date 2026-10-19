@@ -33,7 +33,7 @@ Expiry performs the same guarded release/manual transition with EXPIRED, RESPONS
 
 The winning transition, release marker, job change, rider decrement and events share one transaction. Only PENDING/active/unreleased attempts can win. The release helper validates current and resulting local counters and uses a guarded increment; it never clamps or repairs corruption. Stored original load is used. Other active reservations remain occupied. An audit failure rolls everything back, including the first event if the second fails. Accepted work is never expired by the worker. Pickup/delivery/cancellation release behavior remains later work.
 
-Stored outcome controls retries after an uncertain commit response: the original request can return 503, then the same accept/reject retry reads a committed matching decision without another effect. Exact accepted retries are recognized for matching current accepted work; code also recognizes the later picked-up/delivered outcome shape, but those lifecycle routes are not implemented in this phase. A cancelled/opposing attempt does not falsely replay acceptance.
+Stored outcome controls retries after an uncertain commit response: the original request can return 503, then the same accept/reject retry reads a committed matching decision without another effect. Exact accepted retries recognize matching accepted, picked-up or delivered outcomes. Pickup/delivery routes are implemented and documented in delivery-api.md. A cancelled/opposing attempt does not falsely replay acceptance.
 
 ## Deadline and race policy
 

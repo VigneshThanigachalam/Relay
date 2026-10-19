@@ -44,9 +44,9 @@ Filters are optional and combine with AND. Code is exact/normalized and is not a
 
 ID must be 24 hexadecimal characters; malformed IDs return 400, absent valid IDs 404 RIDER_NOT_FOUND. Detail returns `{data:{...rider,activeAssignments:[attempt]},pagination:{page,pageSize,total}}`. Pagination applies to active attempts. Pending, accepted and picked-up attempts count as occupied work. Expired/rejected/cancelled/delivered attempts are excluded from this active list and remain in the job's operational history.
 
-Attempts sort by assigned time then ID. Shared attempt DTOs show outcome, reservation amount, timestamps, actor, reasons and stored scoring explanation, without private request keys/hashes. An index on riderId/active/assignedAt/ID supports this query. Data, counts and attempts are read in one snapshot. Test fixtures verify attempt visibility; the assignment workflow itself is not implemented in this phase.
+Attempts sort by assigned time then ID. Shared attempt DTOs show outcome, reservation amount, timestamps, actor, reasons and stored scoring explanation, without private request keys/hashes. An index on riderId/active/assignedAt/ID supports this query. Data, counts and attempts are read in one snapshot. Real assignment and seeded reviewer suites verify current attempt visibility and workload.
 
-`availableUnits = capacityUnits - reservedUnits`. Free physical capacity can be positive on an UNAVAILABLE rider; it does not mean the rider is eligible for a particular job. Coverage, load and availability eligibility will be evaluated in the next feature. Invalid stored counter combinations return 409 WORKLOAD_CONFLICT rather than misleading/clamped availability.
+`availableUnits = capacityUnits - reservedUnits`. Free physical capacity can be positive on an UNAVAILABLE rider; it does not mean the rider is eligible for a particular job. The recommendation engine evaluates coverage, load and availability for each job. Invalid stored counter combinations return 409 WORKLOAD_CONFLICT rather than misleading/clamped availability.
 
 ## PATCH rider configuration
 
@@ -111,4 +111,4 @@ curl -i "http://127.0.0.1:4000/api/v1/riders/$RIDER_ID" \
 curl 'http://127.0.0.1:4000/api/v1/riders?code=r-001'
 ```
 
-The new rider has zero workload, so reducing unused capacity to 3 succeeds. Repeat the create to observe 409 DUPLICATE_RIDER. Submit `reservedUnits` in a patch to observe 400. The active-work capacity/zone conflicts are covered by real integration fixtures and tests; they are now demonstrable by assigning through the Phase 6 API. The operational React interface remains pending.
+The new rider has zero workload, so reducing unused capacity to 3 succeeds. Repeat the create to observe 409 DUPLICATE_RIDER. Submit `reservedUnits` in a patch to observe 400. The active-work capacity/zone conflicts are covered by real integration fixtures and tests; they are now demonstrable by assigning through the Phase 6 API. The operational React desk exposes these controls and active workload.

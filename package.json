@@ -2,7 +2,7 @@
   "name": "project-relay",
   "version": "0.1.0",
   "private": true,
-  "description": "Project RELAY — The Autonomous Dispatch Desk",
+  "description": "Project RELAY \u2014 The Autonomous Dispatch Desk",
   "engines": {
     "node": ">=24 <25",
     "npm": ">=11 <12"
@@ -20,7 +20,8 @@
     "test": "npm run test --workspaces",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run format:check && npm run typecheck && npm test && npm run build"
+    "check": "npm run format:check && npm run typecheck && npm test && npm run build",
+    "seed": "npm run seed --workspace @relay/api"
   },
   "devDependencies": {
     "prettier": "^3.6.2",
