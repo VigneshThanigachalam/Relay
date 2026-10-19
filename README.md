@@ -1,6 +1,6 @@
 # Project RELAY
 
-The Autonomous Dispatch Desk technical assignment. **Implemented through Phase 3:** the domain/database foundation plus job creation, durable duplicate replay, filtering, detail, mark-ready and bounded operational history APIs. Job creation and ready transitions commit with their audit events. Rider management, ranking, assignment/reservation services, timeout worker, demo seeds and the operational dashboard remain pending. Next: rider management.
+The Autonomous Dispatch Desk technical assignment. **Implemented through Phase 4:** domain/database foundation, job management with transactional audit/replay, and rider create/list/detail/update APIs with workload protection. Rider availability, capacity and coverage edits preserve active commitments and recheck after transaction conflicts. Ranking, assignment/reservation services, timeout worker, demo seeds and the operational dashboard remain pending. Next: rider recommendations.
 
 ## Review the design
 
@@ -8,13 +8,15 @@ The Autonomous Dispatch Desk technical assignment. **Implemented through Phase 3
 - [System design and architecture diagram](docs/architecture.md)
 - [Job and assignment lifecycle](docs/lifecycle.md)
 - [Implemented job API and curl walkthrough](docs/job-api.md)
+- [Implemented rider API and curl walkthrough](docs/rider-api.md)
 - [Full API contract](docs/api-contract.md) (future endpoints explicitly marked as proposed)
 - [Feature branches, commits and delivery plan](docs/delivery-plan.md)
 - [Assumptions, limitations and next improvements](docs/engineering-notes.md)
 - [Original assignment and extraction](docs/source/README.md)
 - [Phase 1 verification report](docs/phase-1-report.md) (historical)
 - [Phase 2 verification and interview notes](docs/phase-2-report.md) (historical)
-- [Phase 3 verification and interview notes](docs/phase-3-report.md)
+- [Phase 3 verification and interview notes](docs/phase-3-report.md) (historical)
+- [Phase 4 verification and interview notes](docs/phase-4-report.md)
 
 ## Prerequisites
 
@@ -70,7 +72,7 @@ curl http://127.0.0.1:4000/health/live
 curl http://127.0.0.1:4000/health/ready
 ```
 
-Liveness: 200 process status. Readiness: 200 initialized and connected, or 503 unavailable once running. The job endpoints in docs/job-api.md are implemented; other business endpoints return 404. Vite's proxy targets port 4000; if PORT changes, change the two proxy targets in `apps/web/vite.config.ts` as well.
+Liveness: 200 process status. Readiness: 200 initialized and connected, or 503 unavailable once running. The job and rider endpoints in docs/job-api.md and docs/rider-api.md are implemented; other business endpoints return 404. Vite's proxy targets port 4000; if PORT changes, change the two proxy targets in `apps/web/vite.config.ts` as well.
 
 Production compilation and API start:
 
@@ -89,15 +91,15 @@ npm run check
 
 Runs Prettier format check, TypeScript checks for both applications, Vitest/Supertest/React Testing Library tests, and both production builds. Individual commands: `npm run format:check`, `npm run typecheck`, `npm test`, `npm run build`. Watch mode: `npm run test:watch --workspace @relay/api` (or `@relay/web`). Prettier is the only formatting tool; this phase does not claim ESLint coverage.
 
-Foundation tests cover HTTP/error envelopes, configuration and UI phase labeling. Domain/schema tests cover lifecycle, local invariants and typed audit details. The integration suite launches actual `mongod` processes: a temporary single-node replica set for indexes/transactions and a standalone instance for the rejection check. It verifies parallel unique-index collisions, active-attempt protection, retained expired attempts, append-only mutation guards, four-record rollback, startup readiness and index failures. Phase 3 adds real HTTP integration tests for duplicate/key conflicts, concurrent creates, concurrent ready commands, audit rollback, unknown commit recovery, DTO privacy, filters and history. Full assignment/capacity-release races remain pending.
+Foundation tests cover HTTP/error envelopes, configuration and UI phase labeling. Domain/schema tests cover lifecycle, local invariants and typed audit details. The integration suite launches actual `mongod` processes: a temporary single-node replica set for indexes/transactions and a standalone instance for the rejection check. It verifies parallel unique-index collisions, active-attempt protection, retained expired attempts, append-only mutation guards, four-record rollback, startup readiness and index failures. Phase 3 adds real HTTP integration tests for duplicate/key conflicts, concurrent creates, concurrent ready commands, audit rollback, unknown commit recovery, DTO privacy, filters and history. Phase 4 adds real rider HTTP tests, including controlled stale-read/counter-write races for configuration edits. Full assignment/capacity-release races remain pending.
 
 The first test run downloads a roughly 100 MB MongoDB 8.0.17 binary and needs network access. Later runs reuse its cache. The harness uses disposable WiredTiger data directories and never loads or drops `MONGODB_URI`. It disables Unix sockets and uses TCP. It fails if MongoDB cannot start; it does not silently skip database tests or replace them with mocks. To use an existing matching executable, configure the harness-supported `MONGOMS_SYSTEM_BINARY` environment variable. `MONGOMS_VERSION` can override the test version; the verified default is 8.0.17. These are test-harness settings, not API configuration.
 
 The API's schema validation is not a substitute for transaction predicates: Mongoose document validation hooks do not run for arbitrary query updates. Later services must use guarded updates with sessions and field validators where applicable. MongoDB unique indexes enforce identity and active-attempt constraints even during concurrent inserts; cross-document job/rider/attempt consistency belongs to the services still to be implemented.
 
-## Current job API demonstration
+## Current API demonstrations
 
-After starting a real replica set and the API, follow [docs/job-api.md](docs/job-api.md#curl-walkthrough). It creates a job, replays it, marks it ready, filters the list and reads its history without manual database edits. Job mutations require `X-Actor-Id`; this supplies demo attribution, not authentication. The current React screen is a phase indicator, not the operational dashboard.
+After starting a real replica set and the API, follow [docs/job-api.md](docs/job-api.md#curl-walkthrough). It creates a job, replays it, marks it ready, filters the list and reads its history without manual database edits. Job mutations require `X-Actor-Id`; this supplies demo attribution, not authentication. For rider creation, exact-code lookup, coverage/availability filtering and configuration updates, follow [docs/rider-api.md](docs/rider-api.md#curl-walkthrough). The current React screen is a phase indicator, not the operational dashboard.
 
 ## Reviewer workflow and remaining submission work
 

@@ -5,9 +5,9 @@ export function App() {
       <h1>The Autonomous Dispatch Desk</h1>
       <p className="intro">Development foundation</p>
       <section aria-labelledby="phase-status">
-        <h2 id="phase-status">Phase 3 ready for review</h2>
+        <h2 id="phase-status">Phase 4 ready for review</h2>
         <p>
-          Job management APIs and the domain foundation are verified. Dispatch operations will be
+          Job and rider APIs and the domain foundation are verified. Dispatch operations will be
           added in subsequent feature branches.
         </p>
         <p>This screen does not expose delivery data or dispatch actions yet.</p>

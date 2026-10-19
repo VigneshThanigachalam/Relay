@@ -83,6 +83,10 @@ describe('real MongoDB indexes and constraints', () => {
           key: { status: 1, expiresAt: 1, _id: 1 },
         }),
         expect.objectContaining({ name: 'assignment_job_history' }),
+        expect.objectContaining({
+          name: 'assignment_rider_workload',
+          key: { riderId: 1, active: 1, assignedAt: 1, _id: 1 },
+        }),
       ]),
     );
     expect(await models.JobEvent.collection.indexes()).toEqual(

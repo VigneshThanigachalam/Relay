@@ -5,3 +5,5 @@
 The first run requires a binary download; subsequent runs use its cache. Temporary database processes/data are owned by the fixtures, and no application/production URI is used. Unix sockets are disabled; clients use TCP. No tests silently skip when the binary is unavailable. See root README for test-harness environment options.
 
 `jobs.test.ts` adds real Supertest requests for job creation/replay/conflicts, filtering/detail/history, guarded ready transitions and their concurrent/rollback edge cases. Failure injection is explicitly identified in those tests; it wraps real MongoDB transactions rather than substituting a mock database.
+
+`riders.test.ts` verifies rider identity, strict CRUD inputs, filtering, paginated active workload, metadata and capacity/zone/offline protections. Deterministic gates pause a real update after its snapshot read while a direct counter-write fixture commits; resuming proves real transaction conflict/retry behavior. These primitives do not claim a completed dispatch/reservation API.
