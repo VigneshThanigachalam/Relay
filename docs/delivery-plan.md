@@ -55,3 +55,7 @@ Completed on `feat/domain-models` after Phase 1 approval: focused code comments;
 ## Phase 3 checkpoint
 
 Completed on `feat/job-management`: request/error contracts, canonical hashing, transactional creation/audit, persistent duplicate/key replay, snapshot list/filter/history reads, detail and guarded ready commands. Real MongoDB HTTP tests verify parallel creates, ready races, rollback and replay recovery. Comments explain the non-obvious consistency decisions. The single-key creation policy is documented in job-api.md. No rider/assignment APIs or operational dashboard are included. Next branch: `feat/rider-management` after Phase 3 review.
+
+## Phase 4 checkpoint
+
+Completed on `feat/rider-management`: shared transport validation, rider create/list/detail/update APIs, provenance fields, bounded workload DTOs and an active-workload index. Tests verify duplicate identity, validation, filters, occupied work, capacity/zone protection, offline preservation and controlled stale-read races. Future actual assignment services must use the same rider document with atomic eligibility/capacity guards. No recommendation or assignment endpoint is added. Next branch: `feat/recommendations` after Phase 4 review.
