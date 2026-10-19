@@ -1,6 +1,6 @@
 # System design proposal
 
-Implemented through Phase 7: domain/database foundation, job/rider APIs, recommendation scoring, atomic assignment/reservation/replay/overrides, rider responses, transactional rejection/expiry release and persisted-deadline polling. Delivery/cancellation, dedicated manual queue summaries and operational UI remain planned. [Lifecycle](lifecycle.md), [API contract](api-contract.md) and [requirements](requirements.md) track the boundary.
+Implemented through Phase 8: domain/database foundation, job/rider APIs, recommendation scoring, atomic assignment/responses/release and persisted expiry polling, plus manual queue summaries/investigation and reassignment verification. Delivery/cancellation and operational UI remain planned. [Lifecycle](lifecycle.md), [API contract](api-contract.md) and [requirements](requirements.md) track the boundary.
 
 ## Components and responsibilities
 
@@ -152,3 +152,11 @@ Recognized assignment-index/unknown-commit results are resolved from a receipt i
 `worker/timeout-scanner.ts` shortlists at most 100 due PENDING attempts under the existing expiry index, resolves each sequentially, continues individual failures and checks shutdown between attempts. `timeout-worker.ts` scans on startup and uses a new timer only after completion, preventing local overlap. Persisted expiries support restart recovery; duplicate processes are guarded in MongoDB. Polling controls latency, not exact wall-clock execution. Startup starts the worker after listen success; shutdown drains HTTP/current scan before database close under the existing 10-second process budget.
 
 Tests verify forced simultaneous pre-write snapshots for acceptance/expiry with either winner, fresh decision time on real transaction retry, equality expiry, opposing responses, repeated outcomes, duplicate scanners, bounded ordered scans, failure retry and actual reassignment without old-ID interference. Fake timers test scheduler timing; real MongoDB tests cover business outcomes. No production failover or exact-time scheduler guarantee is claimed. See response-timeout-api.md for limits and policy details.
+
+## Phase 8 manual queue read model
+
+`modules/manual-queue` owns bounded zone/page contracts, a thin GET route and a snapshot-owning read service. It filters MANUAL jobs, orders createdAt/ID for oldest received first, then batches relevant event/attempt aggregation by the page IDs. Projections remove scoring snapshots before grouping, so queue payloads stay compact and there is no query per row. Existing indexes suffice; very large job histories can still make aggregation expensive, bounded by query/transaction timeouts.
+
+Current manual age comes from the latest MANUAL_QUEUE_ENTERED sequence, not mutable job updatedAt. Missing/reason-mismatched evidence is flagged with null age/time/entry actor, without hiding or repairing the job. Latest attempt summaries order assignedAt/ID; latest failed-command evidence uses event sequence. Full history/snapshots remain available through the existing endpoint. Shared attempt summary DTO extraction preserves existing full attempt responses.
+
+No separate queue collection or reassignment mutation is introduced. The assignment/resolution services already own membership transitions, eligibility, original-load release and attempt retention. Tests add real public investigation/reassignment, override correction, eight concurrent dispatchers and a gated count-versus-reassignment read race: the returned count, row and previous attempt remain on one snapshot, while the next request sees removal. See manual-queue-api.md and phase-8-report.md.

@@ -1,6 +1,6 @@
 # Rider responses and automatic expiry — Phase 7
 
-Implemented: rider acceptance/rejection, atomic timeout resolution and an in-process persisted-deadline worker. Create an assignment first using assignment-api.md. The React screen remains a phase indicator; pickup/delivery/cancellation and dedicated manual queue summaries are later features.
+Implemented: rider acceptance/rejection, atomic timeout resolution and an in-process persisted-deadline worker. Create an assignment first using assignment-api.md. The React screen remains a phase indicator. Pickup/delivery/cancellation remain Phase 9; dedicated manual queue summaries are now available in [manual-queue-api.md](manual-queue-api.md).
 
 ## HTTP contract
 

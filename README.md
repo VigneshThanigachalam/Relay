@@ -1,6 +1,6 @@
 # Project RELAY
 
-The Autonomous Dispatch Desk technical assignment. **Implemented through Phase 7:** job/rider management, explainable recommendations, atomic assignment/replay/overrides, rider acceptance/rejection, and automatic persisted-deadline expiry with transactional capacity release and history. Dedicated manual queue summaries, delivery actions, public seeds and the operational dashboard remain pending. Next: manual queue investigation and reassignment coverage.
+The Autonomous Dispatch Desk technical assignment. **Implemented through Phase 8:** job/rider management, explainable recommendations, atomic assignment/replay/overrides, responses/automatic expiry with capacity release, and dedicated manual queue investigation with retained attempts and safe reassignment. Delivery actions, public seeds and the operational dashboard remain pending. Next: pickup, delivery and cancellation.
 
 ## Review the design
 
@@ -12,6 +12,7 @@ The Autonomous Dispatch Desk technical assignment. **Implemented through Phase 7
 - [Implemented recommendation API, scoring and curl walkthrough](docs/recommendation-api.md)
 - [Implemented assignment API, replay and curl walkthrough](docs/assignment-api.md)
 - [Rider response and timeout API/demo](docs/response-timeout-api.md)
+- [Manual queue investigation and reassignment demo](docs/manual-queue-api.md)
 - [Full API contract](docs/api-contract.md) (future endpoints explicitly marked as proposed)
 - [Feature branches, commits and delivery plan](docs/delivery-plan.md)
 - [Assumptions, limitations and next improvements](docs/engineering-notes.md)
@@ -22,7 +23,8 @@ The Autonomous Dispatch Desk technical assignment. **Implemented through Phase 7
 - [Phase 4 verification and interview notes](docs/phase-4-report.md) (historical)
 - [Phase 5 verification and interview notes](docs/phase-5-report.md) (historical)
 - [Phase 6 verification and interview notes](docs/phase-6-report.md) (historical)
-- [Phase 7 verification and interview notes](docs/phase-7-report.md)
+- [Phase 7 verification and interview notes](docs/phase-7-report.md) (historical)
+- [Phase 8 verification and interview notes](docs/phase-8-report.md)
 
 ## Prerequisites
 
@@ -78,7 +80,7 @@ curl http://127.0.0.1:4000/health/live
 curl http://127.0.0.1:4000/health/ready
 ```
 
-Liveness: 200 process status. Readiness: 200 initialized and connected, or 503 unavailable once running. The job, rider, recommendation, assignment and rider-response endpoints in their API guides are implemented; other business endpoints return 404. Vite's proxy targets port 4000; if PORT changes, change the two proxy targets in `apps/web/vite.config.ts` as well.
+Liveness: 200 process status. Readiness: 200 initialized and connected, or 503 unavailable once running. The job, rider, recommendation, assignment, rider-response and manual queue endpoints in their API guides are implemented; other business endpoints return 404. Vite's proxy targets port 4000; if PORT changes, change the two proxy targets in `apps/web/vite.config.ts` as well.
 
 Production compilation and API start:
 
@@ -97,7 +99,7 @@ npm run check
 
 Runs Prettier format check, TypeScript checks for both applications, Vitest/Supertest/React Testing Library tests, and both production builds. Individual commands: `npm run format:check`, `npm run typecheck`, `npm test`, `npm run build`. Watch mode: `npm run test:watch --workspace @relay/api` (or `@relay/web`). Prettier is the only formatting tool; this phase does not claim ESLint coverage.
 
-Foundation tests cover HTTP/error envelopes, configuration and UI phase labeling. Domain/schema tests cover lifecycle, local invariants and typed audit details. The integration suite launches actual `mongod` processes: a temporary single-node replica set for indexes/transactions and a standalone instance for the rejection check. It verifies parallel unique-index collisions, active-attempt protection, retained expired attempts, append-only mutation guards, four-record rollback, startup readiness and index failures. Phase 3 adds real HTTP integration tests for duplicate/key conflicts, concurrent creates, concurrent ready commands, audit rollback, unknown commit recovery, DTO privacy, filters and history. Phase 4 adds real rider HTTP tests, including controlled stale-read/counter-write races for configuration edits. Phase 5 adds pure eligibility/scoring tests and real recommendation HTTP tests for audit snapshots, no candidates, rollback, concurrent evaluations and job-state conflicts. Phase 6 adds actual reservation/replay/override HTTP checks and concurrent dispatcher, competing-job and public configuration-edit races. Phase 7 adds real response/expiry/release races, duplicate scanner/restart recovery and nonoverlapping worker lifecycle checks. Delivery/cancellation release checks remain pending.
+Foundation tests cover HTTP/error envelopes, configuration and UI phase labeling. Domain/schema tests cover lifecycle, local invariants and typed audit details. The integration suite launches actual `mongod` processes: a temporary single-node replica set for indexes/transactions and a standalone instance for the rejection check. It verifies parallel unique-index collisions, active-attempt protection, retained expired attempts, append-only mutation guards, four-record rollback, startup readiness and index failures. Phase 3 adds real HTTP integration tests for duplicate/key conflicts, concurrent creates, concurrent ready commands, audit rollback, unknown commit recovery, DTO privacy, filters and history. Phase 4 adds real rider HTTP tests, including controlled stale-read/counter-write races for configuration edits. Phase 5 adds pure eligibility/scoring tests and real recommendation HTTP tests for audit snapshots, no candidates, rollback, concurrent evaluations and job-state conflicts. Phase 6 adds actual reservation/replay/override HTTP checks and concurrent dispatcher, competing-job and public configuration-edit races. Phase 7 adds real response/expiry/release races, duplicate scanner/restart recovery and nonoverlapping worker lifecycle checks. Phase 8 adds queue age/summary/filter validation, public reassignment scenarios, concurrent dispatchers and snapshot-read races. Delivery/cancellation release checks remain pending.
 
 The first test run downloads a roughly 100 MB MongoDB 8.0.17 binary and needs network access. Later runs reuse its cache. The harness uses disposable WiredTiger data directories and never loads or drops `MONGODB_URI`. It disables Unix sockets and uses TCP. It fails if MongoDB cannot start; it does not silently skip database tests or replace them with mocks. To use an existing matching executable, configure the harness-supported `MONGOMS_SYSTEM_BINARY` environment variable. `MONGOMS_VERSION` can override the test version; the verified default is 8.0.17. These are test-harness settings, not API configuration.
 
@@ -105,7 +107,7 @@ The API's schema validation is not a substitute for transaction predicates: Mong
 
 ## Current API demonstrations
 
-After starting a real replica set and the API, follow [docs/job-api.md](docs/job-api.md#curl-walkthrough). It creates a job, replays it, marks it ready, filters the list and reads its history without manual database edits. Job mutations require `X-Actor-Id`; this supplies demo attribution, not authentication. For rider creation, exact-code lookup, coverage/availability filtering and configuration updates, follow [docs/rider-api.md](docs/rider-api.md#curl-walkthrough). For ranking and the no-candidate Manual Queue path, follow [docs/recommendation-api.md](docs/recommendation-api.md#curl-walkthrough). For assignment, replay and override behavior, follow [docs/assignment-api.md](docs/assignment-api.md#curl-walkthrough). For acceptance, rejection, automatic expiry, restart recovery and reassignment, follow [docs/response-timeout-api.md](docs/response-timeout-api.md#curl-demonstration). The current React screen is a phase indicator, not the operational dashboard.
+After starting a real replica set and the API, follow [docs/job-api.md](docs/job-api.md#curl-walkthrough). It creates a job, replays it, marks it ready, filters the list and reads its history without manual database edits. Job mutations require `X-Actor-Id`; this supplies demo attribution, not authentication. For rider creation, exact-code lookup, coverage/availability filtering and configuration updates, follow [docs/rider-api.md](docs/rider-api.md#curl-walkthrough). For ranking and the no-candidate Manual Queue path, follow [docs/recommendation-api.md](docs/recommendation-api.md#curl-walkthrough). For assignment, replay and override behavior, follow [docs/assignment-api.md](docs/assignment-api.md#curl-walkthrough). For acceptance, rejection, automatic expiry, restart recovery and reassignment, follow [docs/response-timeout-api.md](docs/response-timeout-api.md#curl-demonstration). For the dedicated manual queue and investigation workflow, follow [docs/manual-queue-api.md](docs/manual-queue-api.md#reviewer-walkthrough). The current React screen is a phase indicator, not the operational dashboard.
 
 ## Reviewer workflow and remaining submission work
 
