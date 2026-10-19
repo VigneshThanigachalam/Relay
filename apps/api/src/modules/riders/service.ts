@@ -5,8 +5,8 @@ import { systemClock, type Clock } from '../domain/lifecycle.js';
 import { attemptDto } from '../history/dto.js';
 import type { PersistenceModels, RiderRecord } from '../persistence/models.js';
 import { runInTransaction } from '../persistence/transaction.js';
-import type { CreateRiderInput, ListRidersInput } from './contracts.js';
-import { riderDto } from './dto.js';
+import type { CreateRiderInput, ListRidersInput, UpdateRiderInput } from './contracts.js';
+import { assertValidWorkload, riderDto } from './dto.js';
 
 type Dependencies = { connection: Connection; models: PersistenceModels; clock?: Clock };
 function isCodeCollision(error: unknown): boolean {
@@ -73,6 +73,44 @@ export function createRidersService({ connection, models, clock = systemClock }:
       };
     });
   }
-  return { create, list, detail };
+  async function update(id: string, input: UpdateRiderInput, actor: string) {
+    return runInTransaction(connection, async (session) => {
+      const rider = await models.Rider.findById(id).session(session).maxTimeMS(5000);
+      if (!rider) throw new ApiError(404, 'RIDER_NOT_FOUND', 'Rider not found');
+      assertValidWorkload(rider);
+      const capacity = input.capacityUnits ?? rider.capacityUnits;
+      if (capacity < rider.reservedUnits) {
+        throw new ApiError(409, 'CAPACITY_CONFLICT', 'Capacity cannot be lower than reserved load');
+      }
+      const nextZones: readonly string[] = input.serviceZones ?? rider.serviceZones;
+      const removesZone = rider.serviceZones.some((zone) => !nextZones.includes(zone));
+      // Conservative policy: every current zone stays until all active work ends.
+      // Adding coverage is safe; offline means no new work, never a reservation release.
+      if (removesZone && rider.activeJobCount > 0) {
+        throw new ApiError(
+          409,
+          'ACTIVE_ZONE_CONFLICT',
+          'Service zones cannot be removed while the rider has active work',
+        );
+      }
+      // Only explicitly supplied configuration fields are written. In particular,
+      // do not copy a hydrated rider object over counters another transaction owns.
+      const updated = await models.Rider.findOneAndUpdate(
+        {
+          _id: rider._id,
+          reservedUnits: rider.reservedUnits,
+          activeJobCount: rider.activeJobCount,
+          capacityUnits: rider.capacityUnits,
+        },
+        { $set: { ...input, updatedBy: actor, updatedAt: clock.now() } },
+        { new: true, session, runValidators: true, timestamps: false },
+      ).maxTimeMS(5000);
+      // A concurrent reservation writes this same document. MongoDB write conflicts
+      // retry the callback with fresh counters; these guards then run again.
+      if (!updated) throw new ApiError(409, 'STATE_CONFLICT', 'Rider changed; refresh and retry');
+      return { data: riderDto(updated) };
+    });
+  }
+  return { create, list, detail, update };
 }
 export type RidersService = ReturnType<typeof createRidersService>;

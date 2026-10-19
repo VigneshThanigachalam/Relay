@@ -251,6 +251,21 @@ describe('real rider creation and reads', () => {
     const id = (await create()).body.data.id;
     expect((await request(app).get(`/api/v1/riders/${id}?pageSize=101`)).status).toBe(400);
   });
+  it('keeps one rider if a successful create loses its commit reply', async () => {
+    const original = connection.transaction.bind(connection);
+    vi.spyOn(connection, 'transaction').mockImplementationOnce(async (work, options) => {
+      await original(work, options);
+      throw new mongoose.mongo.MongoServerError({
+        message: 'simulated lost rider create reply',
+        errorLabels: ['UnknownTransactionCommitResult'],
+      });
+    });
+    expect((await create()).status).toBe(503);
+    expect((await create()).status).toBe(409);
+    const lookup = await request(app).get('/api/v1/riders?code=R-001');
+    expect(lookup.body.pagination.total).toBe(1);
+    expect(lookup.body.data[0].createdBy).toBe('dispatcher:arun');
+  });
   it('returns 503 without invoking riders when persistence is unavailable', async () => {
     const riders = createRidersService({ connection, models });
     const spy = vi.spyOn(riders, 'list');
@@ -259,4 +274,252 @@ describe('real rider creation and reads', () => {
     expect(res.status).toBe(503);
     expect(spy).not.toHaveBeenCalled();
   });
+});
+
+const patch = (id: string, change: Record<string, unknown>) =>
+  request(app).patch(`/api/v1/riders/${id}`).set('X-Actor-Id', 'dispatcher:meena').send(change);
+
+describe('rider configuration and workload preservation', () => {
+  it('updates editable configuration and last actor while preserving creation provenance', async () => {
+    const created = await create();
+    const id = created.body.data.id;
+    now = new Date('2030-01-01T09:05:00Z');
+    const res = await patch(id, {
+      name: ' Meena ',
+      capacityUnits: 7,
+      currentZone: 'WEST',
+      serviceZones: ['north', 'central', 'west'],
+      availability: 'UNAVAILABLE',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({
+      name: 'Meena',
+      capacityUnits: 7,
+      availableUnits: 7,
+      reservedUnits: 0,
+      activeJobCount: 0,
+      availability: 'UNAVAILABLE',
+      serviceZones: ['CENTRAL', 'NORTH', 'WEST'],
+      currentZone: 'WEST',
+      createdBy: 'dispatcher:arun',
+      updatedBy: 'dispatcher:meena',
+      createdAt: created.body.data.createdAt,
+      updatedAt: now.toISOString(),
+    });
+  });
+  it('allows lowering unused capacity and removing unused coverage', async () => {
+    const id = (await create()).body.data.id;
+    const res = await patch(id, { capacityUnits: 1, serviceZones: ['NORTH'] });
+    expect(res.status).toBe(200);
+    expect(res.body.data.capacityUnits).toBe(1);
+    expect(res.body.data.serviceZones).toEqual(['NORTH']);
+  });
+  it('rejects capacity below reserved units and allows equality', async () => {
+    const id = (await create()).body.data.id;
+    await seedActiveWork(id);
+    const conflict = await patch(id, { capacityUnits: 2 });
+    expect(conflict.status).toBe(409);
+    expect(conflict.body.error.code).toBe('CAPACITY_CONFLICT');
+    expect((await models.Rider.findById(id).orFail()).capacityUnits).toBe(5);
+    const equal = await patch(id, { capacityUnits: 3 });
+    expect(equal.status).toBe(200);
+    expect(equal.body.data).toMatchObject({
+      capacityUnits: 3,
+      reservedUnits: 3,
+      availableUnits: 0,
+      activeJobCount: 3,
+    });
+  });
+  it('rejects removing coverage with active work, but allows additions and reordered equal coverage', async () => {
+    const id = (await create()).body.data.id;
+    await seedActiveWork(id);
+    const conflict = await patch(id, { serviceZones: ['NORTH'] });
+    expect(conflict.status).toBe(409);
+    expect(conflict.body.error.code).toBe('ACTIVE_ZONE_CONFLICT');
+    expect((await patch(id, { serviceZones: ['north', 'central'] })).status).toBe(200);
+    const expanded = await patch(id, { serviceZones: ['NORTH', 'CENTRAL', 'EAST'] });
+    expect(expanded.status).toBe(200);
+    expect(expanded.body.data.serviceZones).toEqual(['CENTRAL', 'EAST', 'NORTH']);
+  });
+  it('keeps every reservation and attempt intact when going offline and back online', async () => {
+    const id = (await create()).body.data.id;
+    await seedActiveWork(id);
+    const before = await models.Assignment.find({ riderId: id }).sort({ _id: 1 }).lean();
+    const offline = await patch(id, { availability: 'UNAVAILABLE' });
+    expect(offline.status).toBe(200);
+    expect(offline.body.data).toMatchObject({
+      availability: 'UNAVAILABLE',
+      reservedUnits: 3,
+      activeJobCount: 3,
+      availableUnits: 2,
+    });
+    const online = await patch(id, { availability: 'AVAILABLE' });
+    expect(online.status).toBe(200);
+    expect(online.body.data.reservedUnits).toBe(3);
+    expect(await models.Assignment.find({ riderId: id }).sort({ _id: 1 }).lean()).toEqual(before);
+    expect(await models.JobEvent.countDocuments()).toBe(0);
+  });
+  it.each([
+    {},
+    { code: 'NEW-CODE' },
+    { reservedUnits: 0 },
+    { activeJobCount: 0 },
+    { availableUnits: 99 },
+    { createdBy: 'forged' },
+    { updatedBy: 'forged' },
+    { capacityUnits: '5' },
+    { capacityUnits: 0 },
+    { serviceZones: [] },
+    { serviceZones: ['north', 'NORTH'] },
+  ])('rejects invalid/server-owned patch %j', async (change) => {
+    const id = (await create()).body.data.id;
+    const res = await patch(id, change);
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    const stored = await models.Rider.findById(id).orFail();
+    expect(stored.code).toBe('R-001');
+    expect(stored.capacityUnits).toBe(5);
+    expect(stored.reservedUnits).toBe(0);
+  });
+  it('requires a valid existing ID and mutation actor', async () => {
+    const id = (await create()).body.data.id;
+    expect((await request(app).patch(`/api/v1/riders/${id}`).send({ name: 'Meena' })).status).toBe(
+      400,
+    );
+    expect((await patch('bad-id', { name: 'Meena' })).status).toBe(400);
+    const absent = await patch('507f191e810c19729de860ea', { name: 'Meena' });
+    expect(absent.status).toBe(404);
+    expect(absent.body.error.code).toBe('RIDER_NOT_FOUND');
+  });
+  it('refuses corrupt counters rather than silently clamping or overwriting them', async () => {
+    const id = (await create()).body.data.id;
+    await models.Rider.collection.updateOne(
+      { _id: new mongoose.Types.ObjectId(id) },
+      { $set: { reservedUnits: 6, activeJobCount: 1 } },
+    );
+    const res = await patch(id, { capacityUnits: 10 });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('WORKLOAD_CONFLICT');
+    expect((await request(app).get(`/api/v1/riders/${id}`)).status).toBe(409);
+    expect((await models.Rider.findById(id).orFail()).reservedUnits).toBe(6);
+  });
+  it('merges concurrent disjoint configuration patches without losing either change', async () => {
+    const id = (await create()).body.data.id;
+    const res = await Promise.all([patch(id, { name: 'Meena' }), patch(id, { capacityUnits: 9 })]);
+    expect(res.every((r) => r.status === 200)).toBe(true);
+    const stored = await models.Rider.findById(id).orFail();
+    expect(stored.name).toBe('Meena');
+    expect(stored.capacityUnits).toBe(9);
+    expect(stored.reservedUnits).toBe(0);
+  });
+  it('reports an unresolved commit response safely; retrying an identical patch preserves counters', async () => {
+    const id = (await create()).body.data.id;
+    await seedActiveWork(id);
+    const original = connection.transaction.bind(connection);
+    vi.spyOn(connection, 'transaction').mockImplementationOnce(async (work, options) => {
+      await original(work, options);
+      throw new mongoose.mongo.MongoServerError({
+        message: 'simulated lost configuration commit reply',
+        errorLabels: ['UnknownTransactionCommitResult'],
+      });
+    });
+    expect((await patch(id, { availability: 'UNAVAILABLE' })).status).toBe(503);
+    const retry = await patch(id, { availability: 'UNAVAILABLE' });
+    expect(retry.status).toBe(200);
+    expect(retry.body.data).toMatchObject({
+      availability: 'UNAVAILABLE',
+      reservedUnits: 3,
+      activeJobCount: 3,
+    });
+  });
+});
+
+function barrier() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
+describe('real MongoDB stale-read protection for configuration edits', () => {
+  it.each([
+    { change: { capacityUnits: 2 }, code: 'CAPACITY_CONFLICT' },
+    { change: { serviceZones: ['NORTH'] }, code: 'ACTIVE_ZONE_CONFLICT' },
+  ])('rechecks $code after a counter-write fixture races the edit', async ({ change, code }) => {
+    const id = (await create()).body.data.id;
+    const reached = barrier();
+    const resume = barrier();
+    const original = models.Rider.collection.findOneAndUpdate.bind(models.Rider.collection);
+    // Hold only the first update after the service has already read/validated the
+    // old rider. The callback retry performs a real unmocked update/read path.
+    const gate = vi
+      .spyOn(models.Rider.collection, 'findOneAndUpdate')
+      .mockImplementationOnce(async (...args) => {
+        reached.release();
+        await resume.promise;
+        return original(...args);
+      });
+    const pending = patch(id, change).then((res) => res);
+    try {
+      await reached.promise;
+      // Controlled fixture simulates the rider-counter write a future atomic
+      // reservation service will make. No assignment API is claimed implemented.
+      await models.Rider.updateOne(
+        { _id: id, reservedUnits: 0, activeJobCount: 0 },
+        { $inc: { reservedUnits: 3, activeJobCount: 1 } },
+        { timestamps: false },
+      );
+      resume.release();
+      const res = await pending;
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe(code);
+      const stored = await models.Rider.findById(id).orFail();
+      expect(stored.capacityUnits).toBe(5);
+      expect([...stored.serviceZones]).toEqual(['CENTRAL', 'NORTH']);
+      expect(stored.reservedUnits).toBe(3);
+      expect(stored.activeJobCount).toBe(1);
+    } finally {
+      resume.release();
+      gate.mockRestore();
+      await pending;
+    }
+  });
+});
+
+it('preserves newly reserved counters when going offline races a counter write', async () => {
+  const id = (await create()).body.data.id;
+  const reached = barrier();
+  const resume = barrier();
+  const original = models.Rider.collection.findOneAndUpdate.bind(models.Rider.collection);
+  const gate = vi
+    .spyOn(models.Rider.collection, 'findOneAndUpdate')
+    .mockImplementationOnce(async (...args) => {
+      reached.release();
+      await resume.promise;
+      return original(...args);
+    });
+  const pending = patch(id, { availability: 'UNAVAILABLE' }).then((res) => res);
+  try {
+    await reached.promise;
+    await models.Rider.updateOne(
+      { _id: id, reservedUnits: 0, activeJobCount: 0 },
+      { $inc: { reservedUnits: 3, activeJobCount: 1 } },
+      { timestamps: false },
+    );
+    resume.release();
+    const res = await pending;
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({
+      availability: 'UNAVAILABLE',
+      capacityUnits: 5,
+      reservedUnits: 3,
+      activeJobCount: 1,
+      availableUnits: 2,
+    });
+  } finally {
+    resume.release();
+    gate.mockRestore();
+    await pending;
+  }
 });
