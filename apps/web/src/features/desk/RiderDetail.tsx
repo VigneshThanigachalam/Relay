@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useResource } from './api';
 import { RiderForm } from './forms';
-import { Badge, ErrorBox, Pager } from './shared';
+import { Icon } from './Icon';
+import { Badge, Empty, ErrorBox, initials, Pager, Skeleton } from './shared';
 import type { Attempt, Pagination, Rider } from './types';
 export function RiderDetail({
   id,
@@ -20,34 +21,79 @@ export function RiderDetail({
   const resource = useResource<{
     data: Rider & { activeAssignments: Attempt[] };
     pagination: Pagination;
-  }>(`/riders/${id}?page=${page}&pageSize=20`, revision);
+  }>(`/riders/${id}?page=${page}&pageSize=20`, revision, `rider:${id}`);
+  const rider = resource.data?.data;
   return (
-    <aside className="panel detail" aria-label="Rider details">
-      <div className="section-head">
-        <h2>Rider details</h2>
-        <button onClick={close}>Close</button>
+    <aside className="detail" aria-label="Rider details">
+      <div className="detail-toolbar">
+        <span>
+          <Icon name="riders" /> Rider profile
+        </span>
+        <button className="icon-button" aria-label="Close" onClick={close}>
+          <Icon name="close" />
+        </button>
       </div>
-      {resource.loading && <p>Loading rider…</p>}
-      {resource.error && <ErrorBox error={resource.error} retry={resource.reload} />}
-      {resource.data && (
+      {resource.loading && (
         <>
-          <RiderForm rider={resource.data.data} done={changed} />
-          <h3>Active workload</h3>
-          <p>
-            {resource.data.data.reservedUnits} of {resource.data.data.capacityUnits} units reserved
-            · {resource.data.data.activeJobCount} active jobs
-          </p>
-          {resource.data.data.activeAssignments.length === 0 && (
-            <p className="empty">No active assignments.</p>
-          )}
-          {resource.data.data.activeAssignments.map((a) => (
-            <div className="work-row" key={a.id}>
-              <button onClick={() => openJob(a.jobId)}>Open job {a.jobId.slice(-6)}</button>
-              <Badge value={a.status} />
-              <span>{a.loadUnits} units</span>
+          <p role="status">Loading rider…</p>
+          <Skeleton />
+        </>
+      )}
+      {resource.error && <ErrorBox error={resource.error} retry={resource.reload} />}
+      {rider && (
+        <>
+          <div className="rider-profile">
+            <span className="avatar large">{initials(rider.name)}</span>
+            <div>
+              <h2>{rider.name}</h2>
+              <p>
+                {rider.code} · {rider.currentZone}
+              </p>
             </div>
-          ))}
-          <Pager pagination={resource.data.pagination} change={setPage} />
+            <Badge value={rider.availability} />
+          </div>
+          <div className="capacity-card">
+            <div>
+              <span>Available capacity</span>
+              <strong>
+                {rider.availableUnits}
+                <small>/ {rider.capacityUnits} units</small>
+              </strong>
+            </div>
+            <div>
+              <span>Active deliveries</span>
+              <strong>{rider.activeJobCount}</strong>
+            </div>
+            <div className="capacity-track">
+              <i style={{ width: `${(100 * rider.reservedUnits) / rider.capacityUnits}%` }} />
+            </div>
+            <p>{rider.reservedUnits} units reserved across pending and active deliveries</p>
+          </div>
+          <RiderForm rider={rider} done={changed} />
+          <section className="workload-section">
+            <h3>Active workload</h3>
+            {rider.activeAssignments.length === 0 ? (
+              <Empty
+                title="No active assignments"
+                description="This rider has no pending or in-progress deliveries."
+              />
+            ) : (
+              rider.activeAssignments.map((a) => (
+                <button className="work-row" key={a.id} onClick={() => openJob(a.jobId)}>
+                  <span className="work-icon">
+                    <Icon name="box" />
+                  </span>
+                  <span>
+                    <strong>Delivery · {a.jobId.slice(-6)}</strong>
+                    <small>{a.loadUnits} capacity units</small>
+                  </span>
+                  <Badge value={a.status} />
+                  <Icon name="chevron" size={15} />
+                </button>
+              ))
+            )}
+            {resource.data && <Pager pagination={resource.data.pagination} change={setPage} />}
+          </section>
         </>
       )}
     </aside>
