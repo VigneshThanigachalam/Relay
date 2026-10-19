@@ -71,3 +71,7 @@ Completed on `feat/assignment-reservation`: strict canonical assignment commands
 ## Phase 7 checkpoint
 
 Completed on `feat/assignment-resolution`: guarded rider responses and expiry, post-commit late-response conflicts, atomic original-load release, matching outcome replay, persisted due scanning, startup recovery and bounded shutdown. Real MongoDB tests force both acceptance/expiry race winners and fresh-time retries, repeated outcomes, corruption rollback, worker duplicates/failure recovery and real reject/expire → new-attempt acceptance. Scheduler unit checks verify nonoverlap/stop/retry. Next: `feat/manual-reassignment` after Phase 7 review, adding dedicated queue summaries/investigation and broader reassignment demonstration coverage. Delivery/cancellation remains Phase 9.
+
+## Phase 8 checkpoint
+
+Completed on `feat/manual-reassignment`: dedicated queue list/filter/pagination, audit-based waiting time and incomplete-evidence flags, compact latest attempt/failure summaries, plus public investigation/reassignment/override and snapshot-race tests. Assignment/resolution primitives were necessarily implemented in Phases 6/7, so this phase reuses them rather than creating another mutation route. No new collections/indexes/dependencies. Next: `feat/delivery-lifecycle` after Phase 8 review, implementing pickup/delivery/cancellation and release/history protections.

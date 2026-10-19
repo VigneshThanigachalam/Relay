@@ -11,6 +11,8 @@ import { createDispatchRouter } from './modules/dispatch/router.js';
 import type { DispatchService } from './modules/dispatch/service.js';
 import { createResolutionRouter } from './modules/dispatch/resolution-router.js';
 import type { ResolutionService } from './modules/dispatch/resolution.js';
+import { createManualQueueRouter } from './modules/manual-queue/router.js';
+import type { ManualQueueService } from './modules/manual-queue/service.js';
 
 type AppDependencies = {
   isReady?: () => boolean;
@@ -19,6 +21,7 @@ type AppDependencies = {
   recommendations?: RecommendationsService;
   dispatch?: DispatchService;
   resolution?: ResolutionService;
+  manualQueue?: ManualQueueService;
 };
 
 export function createApp({
@@ -28,6 +31,7 @@ export function createApp({
   recommendations,
   dispatch,
   resolution,
+  manualQueue,
 }: AppDependencies = {}) {
   // Building the app must not open sockets or connect to MongoDB: Supertest can
   // exercise HTTP contracts while server.ts owns the real process lifecycle.
@@ -67,6 +71,8 @@ export function createApp({
     app.use('/api/v1/jobs', requireReady, createRecommendationsRouter(recommendations));
   if (dispatch) app.use('/api/v1/jobs', requireReady, createDispatchRouter(dispatch));
   if (resolution) app.use('/api/v1/assignments', requireReady, createResolutionRouter(resolution));
+  if (manualQueue)
+    app.use('/api/v1/manual-queue', requireReady, createManualQueueRouter(manualQueue));
   app.use((req, res) => {
     sendError(req, res, 404, 'ROUTE_NOT_FOUND', 'Route not found');
   });

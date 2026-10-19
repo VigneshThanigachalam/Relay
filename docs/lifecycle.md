@@ -68,3 +68,7 @@ Replay checks receipt identity before lifecycle legality; it returns the origina
 The accept/reject/expire rules above are now implemented in dispatch/resolution.ts with guarded transactions and explicit post-commit late-response errors. Accepted work retains reservation. Rejection/expiry terminalizes once, validates/decrements original load and clears job pointers while entering manual. Same rejected reason or matching accepted outcome replays; expired response IDs conflict without another release. Real reassignment tests prove old IDs cannot change new work.
 
 The scanner handles persisted due PENDING attempts only. It runs at startup, limits/serializes each batch, retries failures and schedules after completion. Deadline equality and both race outcomes are tested; driver retry captures a fresh time. Pickup/delivery/cancellation routes remain planned, so their lifecycle arrows above are still design commitments.
+
+## Phase 8 queue investigation
+
+The dedicated queue now reads MANUAL state with its latest entry event and retained attempt/command evidence. It does not mutate lifecycle or create history on GET. Waiting time resets only when a new manual entry commits; reevaluation/failure does not reset it. Reassignment remains a new assignment from MANUAL using a fresh command key and existing guards. Concurrent stale queue reads cannot authorize another reservation. Full history continues to retain earlier attempts and their score snapshots.

@@ -121,7 +121,7 @@ Successful assignment records RIDERS_RECOMMENDED and ASSIGNMENT_CREATED with the
 
 A rejected, validated known-job command records ASSIGNMENT_FAILED in a separate transaction after reservation rollback. Details include error code, operational reason (including hard eligibility reasons) and chosen rider ID; actor/time/sequence are retained. These records appear in history as events, not fabricated reservation attempts. Malformed requests/missing jobs do not invent history. Internal/ambiguous infrastructure errors are not reported as definite business failures. If failure auditing cannot be confirmed, the API returns 503. Repeating a rejected request may add another failure event; rejected keys are not deduplicated. A process crash between rollback and failure-audit commit can omit that rejection record unless the caller retries. A normal 404/409 business rejection is returned only after its required failure audit commits.
 
-A failed direct assignment leaves the job's state unchanged. Evaluate recommendations to use the no-candidate automatic manual-entry policy. Phase 7 now verifies the real reject/expire → reassign flow. Dedicated manual summaries remain later work; current manual assignment and historical receipt checks retain their fixture and public-API coverage.
+A failed direct assignment leaves the job's state unchanged. Evaluate recommendations to use the no-candidate automatic manual-entry policy. Phase 7 now verifies the real reject/expire → reassign flow. Phase 8 adds [dedicated manual queue summaries](manual-queue-api.md); current manual assignment and historical receipt checks retain their fixture and public-API coverage.
 
 ## Curl walkthrough
 
