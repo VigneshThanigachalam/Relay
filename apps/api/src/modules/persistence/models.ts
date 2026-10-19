@@ -204,6 +204,11 @@ assignmentSchema.index(
 );
 assignmentSchema.index({ status: 1, expiresAt: 1, _id: 1 }, { name: 'assignment_due_queue' });
 assignmentSchema.index({ jobId: 1, assignedAt: 1, _id: 1 }, { name: 'assignment_job_history' });
+// Rider detail pages read occupied work independently of the job-history index.
+assignmentSchema.index(
+  { riderId: 1, active: 1, assignedAt: 1, _id: 1 },
+  { name: 'assignment_rider_workload' },
+);
 
 export const eventSchema = new Schema(
   {
