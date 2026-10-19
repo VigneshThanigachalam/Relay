@@ -1,3 +1,4 @@
+import { createDashboardService } from './modules/dashboard/service.js';
 import mongoose from 'mongoose';
 import { createDeliveryService } from './modules/delivery/service.js';
 import { createJobsService } from './modules/jobs/service.js';
@@ -42,6 +43,7 @@ async function start() {
     resolution,
     manualQueue,
     delivery,
+    dashboard: createDashboardService({ connection: mongoose.connection, models }),
   }).listen(config.PORT, () => {
     if (!stopping)
       worker = startTimeoutWorker({

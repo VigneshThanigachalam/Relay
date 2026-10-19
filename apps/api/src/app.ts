@@ -1,3 +1,5 @@
+import { createDashboardRouter } from './modules/dashboard/router.js';
+import type { DashboardService } from './modules/dashboard/service.js';
 import { randomUUID } from 'node:crypto';
 import express, { type RequestHandler } from 'express';
 import { errorHandler, sendError } from './http/errors.js';
@@ -26,6 +28,7 @@ type AppDependencies = {
   resolution?: ResolutionService;
   manualQueue?: ManualQueueService;
   delivery?: DeliveryService;
+  dashboard?: DashboardService;
 };
 
 export function createApp({
@@ -37,6 +40,7 @@ export function createApp({
   resolution,
   manualQueue,
   delivery,
+  dashboard,
 }: AppDependencies = {}) {
   // Building the app must not open sockets or connect to MongoDB: Supertest can
   // exercise HTTP contracts while server.ts owns the real process lifecycle.
@@ -78,6 +82,7 @@ export function createApp({
   if (resolution) app.use('/api/v1/assignments', requireReady, createResolutionRouter(resolution));
   if (manualQueue)
     app.use('/api/v1/manual-queue', requireReady, createManualQueueRouter(manualQueue));
+  if (dashboard) app.use('/api/v1/dashboard', requireReady, createDashboardRouter(dashboard));
   if (delivery) app.use('/api/v1/jobs', requireReady, createDeliveryRouter(delivery));
   app.use((req, res) => {
     sendError(req, res, 404, 'ROUTE_NOT_FOUND', 'Route not found');
