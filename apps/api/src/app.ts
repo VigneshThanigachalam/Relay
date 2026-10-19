@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import express from 'express';
+import express, { type RequestHandler } from 'express';
 import { errorHandler, sendError } from './http/errors.js';
 import { createJobsRouter } from './modules/jobs/router.js';
 import type { JobsService } from './modules/jobs/service.js';
+import { createRidersRouter } from './modules/riders/router.js';
+import type { RidersService } from './modules/riders/service.js';
 
-type AppDependencies = { isReady?: () => boolean; jobs?: JobsService };
+type AppDependencies = { isReady?: () => boolean; jobs?: JobsService; riders?: RidersService };
 
-export function createApp({ isReady = () => false, jobs }: AppDependencies = {}) {
+export function createApp({ isReady = () => false, jobs, riders }: AppDependencies = {}) {
   // Building the app must not open sockets or connect to MongoDB: Supertest can
   // exercise HTTP contracts while server.ts owns the real process lifecycle.
   const app = express();
@@ -32,19 +34,15 @@ export function createApp({ isReady = () => false, jobs }: AppDependencies = {})
     }
     res.json({ data: { status: 'ready' } });
   });
-  if (jobs) {
-    app.use(
-      '/api/v1/jobs',
-      (req, res, next) => {
-        if (!isReady()) {
-          sendError(req, res, 503, 'DEPENDENCY_UNAVAILABLE', 'Database is not ready');
-          return;
-        }
-        next();
-      },
-      createJobsRouter(jobs),
-    );
-  }
+  const requireReady: RequestHandler = (req, res, next) => {
+    if (!isReady()) {
+      sendError(req, res, 503, 'DEPENDENCY_UNAVAILABLE', 'Database is not ready');
+      return;
+    }
+    next();
+  };
+  if (jobs) app.use('/api/v1/jobs', requireReady, createJobsRouter(jobs));
+  if (riders) app.use('/api/v1/riders', requireReady, createRidersRouter(riders));
   app.use((req, res) => {
     sendError(req, res, 404, 'ROUTE_NOT_FOUND', 'Route not found');
   });
