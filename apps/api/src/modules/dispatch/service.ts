@@ -131,15 +131,17 @@ export function createDispatchService({
             now,
           );
           const chosen = snapshot.eligible.find((candidate) => candidate.riderId === input.riderId);
-          if (!chosen)
+          if (!chosen) {
+            const reasons = snapshot.excluded.find(
+              (candidate) => candidate.riderId === input.riderId,
+            )!.reasons;
             throw new ApiError(
               409,
               'RIDER_INELIGIBLE',
-              'Chosen rider is not eligible',
-              snapshot.excluded
-                .find((candidate) => candidate.riderId === input.riderId)
-                ?.reasons.map((reason) => ({ path: 'riderId', message: reason })),
+              `Chosen rider is not eligible: ${reasons.join(', ')}`,
+              reasons.map((reason) => ({ path: 'riderId', message: reason })),
             );
+          }
           const best = snapshot.eligible[0]!;
           const override = best.riderId !== input.riderId;
           if (override && !input.overrideReason)

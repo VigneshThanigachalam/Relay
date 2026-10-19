@@ -250,6 +250,7 @@ describe('eligibility, overrides and rejected command history', () => {
     const event = await models.JobEvent.findOne({ jobId: job.id }).orFail();
     expect(event).toMatchObject({ type: 'ASSIGNMENT_FAILED', actor, sequence: 1 });
     expect(event.details).toMatchObject({ code: 'RIDER_INELIGIBLE', riderId: rider.id });
+    expect(event.details.reason).toContain(reason);
     await assertWorkload(rider.id);
   });
   it('rejects corrupt counters rather than clamping or adding to them', async () => {
