@@ -1,6 +1,6 @@
 # System design proposal
 
-Implemented through Phase 4: domain/database foundation, jobs service and transactional history, plus rider create/list/detail/update services with protected workload/configuration edits. Recommendation/assignment services, worker and operational UI described below remain planned. The stack follows the user's specification. The assignment itself permits tool choice. [Lifecycle](lifecycle.md), [API contract](api-contract.md) and [requirements](requirements.md) define the remaining behavior.
+Implemented through Phase 5: domain/database foundation, job and rider APIs, and pure recommendation scoring with transactional snapshots/no-candidate manual handling. Assignment services, worker and operational UI below remain planned. The stack follows the user specification; the assignment itself permits tool choice. [Lifecycle](lifecycle.md), [API contract](api-contract.md) and [requirements](requirements.md) distinguish implemented and remaining behavior.
 
 ## Components and responsibilities
 
@@ -81,7 +81,7 @@ Retry only driver-labelled transient transactions; keep HTTP requests bounded an
 
 Eligibility is a hard gate: available, supports **both** zones and remaining units >= job load. Capacity never becomes a soft scoring exception, including overrides. Return excluded riders with reasons for operator clarity. An override cannot bypass eligibility.
 
-Simulate a small fixed zone-to-zone travel-time matrix. Travel estimate = rider current zone → pickup + pickup → delivery + 5 minutes per active job. Missing matrix entry uses a documented 60-minute conservative fallback and flags `estimatedByFallback`; no real GPS or SLA promise. Example weights below are design choices and must be exercised by tests before acceptance.
+Simulate a small fixed zone-to-zone travel-time matrix. Travel estimate = rider current zone → pickup + pickup → delivery + 5 minutes per active job. Missing matrix entry uses a documented 60-minute conservative fallback and flags `estimatedByFallback`; no real GPS or SLA promise. The following v1 weights are implemented and tested; the complete matrix and examples are in recommendation-api.md.
 
 Lower cost ranks first: `travelCost + workloadCost + deadlineCost`.
 
@@ -89,7 +89,7 @@ Lower cost ranks first: `travelCost + workloadCost + deadlineCost`.
 - `workloadCost = 20 * (reservedUnits / capacityUnits) + 5 * activeJobCount`.
 - `deadlineCost = 4 * max(0, estimatedMinutes - minutesUntilDeadline)` when a deadline exists, otherwise 0. Past deadlines remain actionable and visibly at risk.
 
-Return each numeric component, predicted arrival, free units, active count, explanation, scoring version and the matrix estimate. Tie break by rider code ascending. Priority increases the relative importance of travel versus load balancing; deadline penalizes likely lateness rather than removing all candidates. Rank at most the small fleet in memory for this assignment. Requesting recommendations is a POST because it records a snapshot audit event and can move no-candidate ready work into the manual queue. Repeated no-candidate checks do not repeat the manual transition event.
+Return each numeric component, estimated duration, free units, active count, explanation, scoring version and the matrix estimate. Tie break by rider code ascending. Priority increases the relative importance of travel versus load balancing; deadline penalizes likely lateness rather than removing all candidates. Rank at most the small fleet in memory for this assignment. Requesting recommendations is a POST because it records a snapshot audit event and can move no-candidate ready work into the manual queue. Repeated no-candidate checks do not repeat the manual transition event.
 
 ## Bounded operational behavior
 
@@ -126,3 +126,11 @@ Creation captures a unique normalized immutable code, zero counters and server-o
 PATCH validates current counters, then proposed capacity and zone changes. Reducing capacity below reserved units conflicts. Any coverage removal conflicts while active work remains (an intentionally conservative policy); additions are safe. Offline configuration preserves reservations. A conditional update writes only supplied configuration fields plus updatedBy/time and guards the counter/capacity snapshot. A concurrent write to the rider causes a transaction conflict and a fresh recheck; controlled real-MongoDB tests prove the stale-read capacity/zone cases and preservation during offline changes. Future reservation services must still guard availability, coverage and capacity atomically; these tests do not implement that service.
 
 CreatedBy/updatedBy are last-writer provenance, not a full rider audit log. Job events retain their append-only semantics and are not fabricated for unrelated rider configuration. The four-collection design is preserved.
+
+## Phase 5 recommendation implementation
+
+`modules/recommendations/engine.ts` is pure: explicit job/rider inputs, clock value and optional travel matrix; no database/HTTP access. It returns the existing strict v1 snapshot shape with numeric breakdowns, reasons and deterministic ranks. Invalid local counters exclude that rider explicitly. Both zones and remaining capacity are hard gates. Binary code/ID tie breaks avoid host-locale differences; rounded components explain the rounded total. See recommendation-api.md for the exact matrix and formula.
+
+The service reads the job/fleet in one snapshot and appends RIDERS_RECOMMENDED. With zero candidates, READY becomes MANUAL with NO_ELIGIBLE_RIDER and a second event, in the same transaction. Already-manual reevaluation keeps the original reason/state version. A fresh evaluation is audited per request, without command-key replay; uncertain commits return 503 and retries can add evaluation events. History retains the original snapshot.
+
+Audit sequence allocation writes the job document, forcing retries against concurrent job writes. Tests demonstrate eight concurrent no-candidate evaluations produce one manual entry, plus a deterministic stale-read cancellation fixture rejects a now-invalid evaluation. Riders are read without reservations; concurrent rider changes may make advice stale. Phase 6 must recompute eligibility and guard capacity on the rider document. The full fleet and snapshots are unbounded in rider count, a documented small-fleet trade-off. No new indexes, collections or dependencies were needed.

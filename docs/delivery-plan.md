@@ -59,3 +59,7 @@ Completed on `feat/job-management`: request/error contracts, canonical hashing, 
 ## Phase 4 checkpoint
 
 Completed on `feat/rider-management`: shared transport validation, rider create/list/detail/update APIs, provenance fields, bounded workload DTOs and an active-workload index. Tests verify duplicate identity, validation, filters, occupied work, capacity/zone protection, offline preservation and controlled stale-read races. Future actual assignment services must use the same rider document with atomic eligibility/capacity guards. No recommendation or assignment endpoint is added. Next branch: `feat/recommendations` after Phase 4 review.
+
+## Phase 5 checkpoint
+
+Completed on `feat/recommendations`: pure hard eligibility and explainable scoring v1, a complete simulated travel matrix with conservative fallback, deterministic ranking, recommendation API and audit snapshots. No candidates atomically moves READY into manual; already-manual reevaluation preserves reason/version. Tests cover scoring boundaries, HTTP validation, audit rollback, concurrent evaluations and a controlled job-state race. The endpoint reserves no capacity. Next branch: `feat/assignment-reservation` after Phase 5 review.

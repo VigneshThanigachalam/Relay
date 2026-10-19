@@ -58,16 +58,13 @@ afterAll(async () => {
 
 describe('real recommendation API and history', () => {
   it('creates a job and rider over HTTP, marks ready and records an explainable recommendation', async () => {
-    const created = await request(app)
-      .post('/api/v1/jobs')
-      .set('X-Actor-Id', actor)
-      .send({
-        orderReference: 'DEMO-REC',
-        pickupZone: 'CENTRAL',
-        deliveryZone: 'NORTH',
-        loadUnits: 2,
-        priority: 'HIGH',
-      });
+    const created = await request(app).post('/api/v1/jobs').set('X-Actor-Id', actor).send({
+      orderReference: 'DEMO-REC',
+      pickupZone: 'CENTRAL',
+      deliveryZone: 'NORTH',
+      loadUnits: 2,
+      priority: 'HIGH',
+    });
     expect(created.status).toBe(201);
     const id = created.body.data.id;
     const rider = await request(app)

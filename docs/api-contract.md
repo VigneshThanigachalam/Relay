@@ -1,6 +1,6 @@
 # API contract and implementation status
 
-Implemented through Phase 4: health, job create/list/detail/ready/history, and rider create/list/detail/update routes. [The job guide](job-api.md) and [rider guide](rider-api.md) give tested contracts, limits, error cases and curl walkthroughs. Recommendation, assignment, delivery-update, manual-queue and dashboard endpoints in the table remain **proposed**.
+Implemented through Phase 5: health, job create/list/detail/ready/history, rider create/list/detail/update, and job recommendations. The [job guide](job-api.md), [rider guide](rider-api.md) and [recommendation guide](recommendation-api.md) give tested contracts and walkthroughs. Assignment, delivery-update, dedicated manual-queue and dashboard endpoints remain **proposed**. The existing job status filter can list manual jobs now.
 
 JSON over HTTP. IDs are MongoDB ObjectId strings; timestamps are UTC ISO 8601. Payloads reject unknown fields. `X-Actor-Id` is required for user-initiated business mutations (1–80 characters); the demo UI will send `dispatcher:demo` or `rider:<id>`. This is simulated attribution, not authentication. Generate one `Idempotency-Key` per assignment user action and reuse on network retries (1–128 characters). Server returns `X-Request-Id` on every response.
 
@@ -128,4 +128,8 @@ Ready commands return `{data:job,replayed:boolean}`. Only NEW can transition; re
 
 Rider codes are normalized, unique and immutable. Repeated creates return 409 DUPLICATE_RIDER, not job-style replay; an uncertain committed create can be recovered by exact-code lookup. Create/PATCH require an actor, stored as createdBy/updatedBy provenance. These fields are nullable on legacy/test records and do not constitute an append-only configuration log.
 
-PATCH writes only editable fields and server provenance/time, never workload counters. Capacity may equal but not fall below reserved load. Service-zone removal is conservatively blocked while activeJobCount > 0; additions are allowed. Going UNAVAILABLE preserves pending/accepted/picked-up attempts and counters. Transaction conflicts rerun the checks on fresh state. List/detail use snapshot reads and bounded pagination; detail pagination applies to active assignments. Free capacity is a physical quantity even if a rider is offline; actual per-job eligibility is the next feature.
+PATCH writes only editable fields and server provenance/time, never workload counters. Capacity may equal but not fall below reserved load. Service-zone removal is conservatively blocked while activeJobCount > 0; additions are allowed. Going UNAVAILABLE preserves pending/accepted/picked-up attempts and counters. Transaction conflicts rerun the checks on fresh state. List/detail use snapshot reads and bounded pagination; detail pagination applies to active assignments. Free capacity is a physical quantity even if a rider is offline; actual per-job eligibility is now available through the recommendation endpoint.
+
+## Implemented recommendation policy
+
+POST recommendations requires actor, explicit JSON `{}` and no query parameters. Only READY/MANUAL is legal. It returns the v1 snapshot plus jobStatus and appends RIDERS_RECOMMENDED; no candidates moves READY to MANUAL with a second event atomically. Already-manual reevaluation preserves reason/version. It reserves nothing and has no idempotency-key replay contract; retries evaluate again. See recommendation-api.md for the exact matrix, formula, exclusion reasons, rounding, concurrency semantics and curl examples.
