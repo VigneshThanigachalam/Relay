@@ -1,6 +1,6 @@
-# System design proposal
+# System design
 
-Implemented through Phase 8: domain/database foundation, job/rider APIs, recommendation scoring, atomic assignment/responses/release and persisted expiry polling, plus manual queue summaries/investigation and reassignment verification. Delivery/cancellation and operational UI remain planned. [Lifecycle](lifecycle.md), [API contract](api-contract.md) and [requirements](requirements.md) track the boundary.
+Implemented through Phase 11: the full local dispatch lifecycle, operational React interface, snapshot dashboard/manual views, sample scenarios and documentation. [Lifecycle](lifecycle.md), [API guides](api-contract.md), [requirements](requirements.md) and [verification](verification.md) reconcile implementation with evidence.
 
 ## Components and responsibilities
 
@@ -8,21 +8,19 @@ Implemented through Phase 8: domain/database foundation, job/rider APIs, recomme
 flowchart TD
   UI["React dispatch desk"] --> HTTP["Express validation and controllers"]
   HTTP --> Services["Job, rider and dispatch services"]
-  HTTP --> Rank["Pure eligibility and ranking"]
+  Services --> Rank["Pure eligibility and ranking"]
   Tick["In-process timeout scanner"] --> Services
   Services --> Tx["Mongoose transaction boundary"]
-  Rank --> Read["Read repositories"]
-  Read --> DB[("MongoDB replica set")]
-  Tx --> DB
+  Tx --> DB[("MongoDB replica set")]
 ```
 
 One repository with npm workspaces: `apps/api` and `apps/web`. One backend process runs Express plus a restart-safe polling worker; no queue broker is necessary. Modules own domain rules and persistence access. Controllers parse Zod input, identify actor and call a service; they do not reserve capacity or implement transitions. Pure functions rank candidates and validate lifecycle transitions; a clock abstraction allows deterministic boundary tests. Transaction callbacks use sequential awaited database operations and have no external side effects because the driver may retry them.
 
-Use native fetch, React state and explicit refresh after mutations for this bounded dashboard. Avoid adding a global state library or client cache before there is a demonstrated need. Vite proxies `/api` and `/health` to Express locally, avoiding a CORS dependency. Frontend DTO types can be added alongside endpoints; do not expose Mongoose documents to the client.
+Use native fetch, React state and explicit refresh after mutations for this bounded dashboard. Avoid adding a global state library or client cache before there is a demonstrated need. Vite proxies `/api` and `/health` to Express locally, avoiding a CORS dependency. Frontend DTO types live with the desk components; do not expose Mongoose documents to the client.
 
 ## Data model
 
-| Collection  | Phase 2 schema fields                                                                                                                                                                                                                                    | Purpose and constraints                                                                                                                                                                                                               |
+| Collection  | Schema fields                                                                                                                                                                                                                                            | Purpose and constraints                                                                                                                                                                                                               |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | jobs        | `_id`, `orderReference`, `requestHash`, optional `creationKey`, pickup/delivery zone, `loadUnits`, priority, `deadlineAt?`, `status`, `activeAssignmentId?`, `assignedRiderId?`, `manualReason?`, `version`, `eventSequence`, created/updated timestamps | Reference trimmed/uppercased before hashing/indexing. Strict integer load > 0; UTC dates; server creation time. Clear current assignment/rider when releasing; history preserves old links.                                           |
 | riders      | `_id`, unique `code`, `name`, `serviceZones[]`, `currentZone`, `availability`, `capacityUnits`, `reservedUnits`, `activeJobCount`, `createdBy?`, `updatedBy?`, timestamps                                                                                | `reservedUnits` includes pending, accepted and picked-up attempts. Available capacity = total minus reserved. Availability means willing to take new work; offline does not erase existing obligations.                               |
@@ -95,19 +93,19 @@ Return each numeric component, estimated duration, free units, active count, exp
 
 Default confirmation deadline = assignedAt + 7,200,000 ms, captured once per attempt; changing configuration affects future attempts. Scanner interval defaults to 5,000 ms; short demo uses threshold 5,000 ms and interval 1,000 ms. Timeout is eligible at the threshold; visible movement occurs on the next successful scan, not at an exact timer instant. Scan at startup and each tick, process batches (e.g. 100), catch/report scan failures and retry. Stored deadlines allow recovery after downtime. Inject a clock into services/tests, not a public clock-changing API. Never use a setTimeout per assignment as the source of truth.
 
-API foundation config bounds were implemented in Phase 1. The Phase 2 transaction helper uses a 15-second driver retry budget and a 5-second commit limit; callback operations must all use its session. These database timeouts are independent of the two-hour rider response threshold. Future queries should set maxTimeMS and driver server-selection/socket timeouts; these serve distinct purposes. A request timeout alone does not prove a mutation failed: command replay handles lost responses. Lists capped at 100, JSON bodies at 64 KiB. Request IDs aid troubleshooting; safe errors never expose database URLs/stacks. Actor header is only a demo identity, not an auth boundary.
+API foundation config bounds were implemented in Phase 1. The Phase 2 transaction helper uses a 15-second driver retry budget and a 5-second commit limit; callback operations must all use its session. These database timeouts are independent of the two-hour rider response threshold. Feature queries set maxTimeMS; connection settings bound server selection and socket waits; these serve distinct purposes. A request timeout alone does not prove a mutation failed: command replay handles lost responses. Lists capped at 100, JSON bodies at 64 KiB. Request IDs aid troubleshooting; safe errors never expose database URLs/stacks. Actor header is only a demo identity, not an auth boundary.
 
 ## Trade-offs and references
 
 A transaction-based modular monolith is easy to run and defend, but uses a hot rider counter document and a polling worker. Query and counter reconciliation would be needed at larger scale. Database permissions and stronger retention controls would be needed to protect audit history against privileged database users; application append-only is not tamper-proof storage.
 
-Official references checked during Phase 1: [MongoDB transactions](https://www.mongodb.com/docs/manual/core/transactions/), [unique indexes](https://www.mongodb.com/docs/manual/core/index-unique/), [Vite prerequisites](https://vite.dev/guide/). These explain platform mechanics; the application policies above are proposed engineering decisions.
+Official references checked during Phase 1: [MongoDB transactions](https://www.mongodb.com/docs/manual/core/transactions/), [unique indexes](https://www.mongodb.com/docs/manual/core/index-unique/), [Vite prerequisites](https://vite.dev/guide/). These explain platform mechanics; the application policies above are implemented application policies.
 
 ## Implemented validation boundaries
 
 Schemas and the model factory live in `apps/api/src/modules/persistence/models.ts`; pure policies and typed Zod audit payloads live in `modules/domain`. Schema validators protect document creation/save; strict mode rejects unknown fields and immutable identity/load edits. Audit guards cover save, query/document update/delete, replacement, bulk writes and lean insertMany validation bypass. Raw collection access or a privileged administrator can bypass Mongoose guards; tests use raw deletion only for disposable fixture cleanup.
 
-Mongoose does not enforce foreign keys, historical transitions, or cross-document counter equality. Query updates do not execute document pre-validation hooks. The future dispatch services must implement the guarded predicates and transaction boundaries in the risk table; Phase 2 verifies the infrastructure, not those unimplemented services. The temporary real-MongoDB harness verifies active-attempt indexes for pending, accepted and picked-up records and four-record rollback. Docker and production replication/permissions remain unverified.
+Mongoose does not enforce foreign keys, historical transitions, or cross-document counter equality. Query updates do not execute document pre-validation hooks. Dispatch, response and delivery services implement the guarded predicates and transaction boundaries in the risk table. The temporary real-MongoDB harness verifies active-attempt indexes for pending, accepted and picked-up records and four-record rollback. Docker and production replication/permissions remain unverified.
 
 ## Phase 3 job implementation
 
@@ -115,7 +113,7 @@ Mongoose does not enforce foreign keys, historical transitions, or cross-documen
 
 Creation checks a durable key first, then the normalized reference; conflicting key ownership takes precedence. The canonical hash makes explicit defaults/ISO offsets equivalent. A different key on an existing reference is rejected, avoiding unbound key reuse without adding another collection. Duplicate-key recovery runs after the aborted transaction, using only job identity indexes; audit-index conflicts are not swallowed. Unknown creation commit results are reconciled by a majority read; unresolved outcomes return 503 and callers retry the same request. Ready retries rely on the stored current state. Read-only lists/history use sequential snapshot queries for consistent pagination totals within each response and have bounded page sizes/query timeouts. This adds transaction overhead to reads, an acceptable small-application trade-off.
 
-See job-api.md and phase-3-report.md for the tested scope. These job concurrency checks do not prove assignment reservation or release-once behavior, which remains a later feature.
+See job-api.md and phase-3-report.md for the tested scope. Assignment, resolution and delivery integration suites separately verify reservation and release-once behavior.
 
 ## Phase 4 rider implementation
 
@@ -123,7 +121,7 @@ See job-api.md and phase-3-report.md for the tested scope. These job concurrency
 
 Creation captures a unique normalized immutable code, zero counters and server-owned actor/time provenance. Lists filter exact code, supported service zone and availability. Detail pages include bounded active attempts under a new rider/active/assignedAt index; counters and rows are read in one snapshot. Pending, accepted and picked-up attempts remain occupied.
 
-PATCH validates current counters, then proposed capacity and zone changes. Reducing capacity below reserved units conflicts. Any coverage removal conflicts while active work remains (an intentionally conservative policy); additions are safe. Offline configuration preserves reservations. A conditional update writes only supplied configuration fields plus updatedBy/time and guards the counter/capacity snapshot. A concurrent write to the rider causes a transaction conflict and a fresh recheck; controlled real-MongoDB tests prove the stale-read capacity/zone cases and preservation during offline changes. Future reservation services must still guard availability, coverage and capacity atomically; these tests do not implement that service.
+PATCH validates current counters, then proposed capacity and zone changes. Reducing capacity below reserved units conflicts. Any coverage removal conflicts while active work remains (an intentionally conservative policy); additions are safe. Offline configuration preserves reservations. A conditional update writes only supplied configuration fields plus updatedBy/time and guards the counter/capacity snapshot. A concurrent write to the rider causes a transaction conflict and a fresh recheck; controlled real-MongoDB tests prove the stale-read capacity/zone cases and preservation during offline changes. The assignment service guards availability, coverage and remaining capacity atomically; actual public configuration/reservation races are covered separately.
 
 CreatedBy/updatedBy are last-writer provenance, not a full rider audit log. Job events retain their append-only semantics and are not fabricated for unrelated rider configuration. The four-collection design is preserved.
 
@@ -133,15 +131,15 @@ CreatedBy/updatedBy are last-writer provenance, not a full rider audit log. Job 
 
 The service reads the job/fleet in one snapshot and appends RIDERS_RECOMMENDED. With zero candidates, READY becomes MANUAL with NO_ELIGIBLE_RIDER and a second event, in the same transaction. Already-manual reevaluation keeps the original reason/state version. A fresh evaluation is audited per request, without command-key replay; uncertain commits return 503 and retries can add evaluation events. History retains the original snapshot.
 
-Audit sequence allocation writes the job document, forcing retries against concurrent job writes. Tests demonstrate eight concurrent no-candidate evaluations produce one manual entry, plus a deterministic stale-read cancellation fixture rejects a now-invalid evaluation. Riders are read without reservations; concurrent rider changes may make advice stale. Phase 6 must recompute eligibility and guard capacity on the rider document. The full fleet and snapshots are unbounded in rider count, a documented small-fleet trade-off. No new indexes, collections or dependencies were needed.
+Audit sequence allocation writes the job document, forcing retries against concurrent job writes. Tests demonstrate eight concurrent no-candidate evaluations produce one manual entry, plus a deterministic stale-read cancellation fixture rejects a now-invalid evaluation. Riders are read without reservations; concurrent rider changes may make advice stale. Assignment recomputes eligibility and guards capacity on the rider document. The full fleet and snapshots are unbounded in rider count, a documented small-fleet trade-off. No new indexes, collections or dependencies were needed.
 
 ## Phase 6 assignment implementation
 
-`modules/dispatch/contracts.ts` validates/canonicalizes the command and hashes only rider ID/reason. `router.ts` handles HTTP; `service.ts` owns the transaction/recovery/failure-audit boundaries and reuses the pure ranking engine. Existing collections/indexes suffice. Server wiring now passes the validated response threshold into assignment creation; no worker runs yet.
+`modules/dispatch/contracts.ts` validates/canonicalizes the command and hashes only rider ID/reason. `router.ts` handles HTTP; `service.ts` owns the transaction/recovery/failure-audit boundaries and reuses the pure ranking engine. Existing collections/indexes suffice. Server wiring now passes the validated response threshold into assignment creation; the worker lifecycle is described below.
 
 The service reads job and successful key first. Exact replay returns original attempt/current job without revalidating eligibility or adding events; a changed payload conflicts. New commands require READY/MANUAL with no active attempt. The transaction computes scoring, validates choice/override, conditionally updates job status/version/empty pointers, and increments rider counters with availability, both zones, capacity/counter snapshots and a remaining-capacity expression. This rider write forces competing jobs/configuration edits to retry against fresh state. Query `$inc` is protected by explicit invariants, not assumed document-hook validation. It inserts an immutable attempt/load/expiry/receipt/snapshot and required events before commit.
 
-Snapshots represent a consistent fleet view, not global serialization of all rider rankings: other unselected riders can change. Hard eligibility/capacity of the selected rider is guarded by its write. Partial active-attempt and job/key unique indexes remain defense in depth. Terminal fixtures verify receipt lifetime/reassignment primitives; the real response/release flow is still Phase 7/8.
+Snapshots represent a consistent fleet view, not global serialization of all rider rankings: other unselected riders can change. Hard eligibility/capacity of the selected rider is guarded by its write. Partial active-attempt and job/key unique indexes remain defense in depth. Terminal fixtures verify receipt lifetime/reassignment primitives; the real response/release flow is verified in the resolution, manual queue and reviewer demonstration suites.
 
 Recognized assignment-index/unknown-commit results are resolved from a receipt in a fresh transaction; unresolved outcomes return 503. Auditable known-job business failures append ASSIGNMENT_FAILED only after state rollback, in a separate transaction; failed audit confirmation returns 503. No false failed reservation attempt is fabricated. Tests verify eight-way same-job/same-key races, six jobs sharing limited capacity, both orders of actual public rider configuration conflicts, rollback, private DTOs and receipt recovery. See assignment-api.md and phase-6-report.md.
 
@@ -160,3 +158,11 @@ Tests verify forced simultaneous pre-write snapshots for acceptance/expiry with 
 Current manual age comes from the latest MANUAL_QUEUE_ENTERED sequence, not mutable job updatedAt. Missing/reason-mismatched evidence is flagged with null age/time/entry actor, without hiding or repairing the job. Latest attempt summaries order assignedAt/ID; latest failed-command evidence uses event sequence. Full history/snapshots remain available through the existing endpoint. Shared attempt summary DTO extraction preserves existing full attempt responses.
 
 No separate queue collection or reassignment mutation is introduced. The assignment/resolution services already own membership transitions, eligibility, original-load release and attempt retention. Tests add real public investigation/reassignment, override correction, eight concurrent dispatchers and a gated count-versus-reassignment read race: the returned count, row and previous attempt remain on one snapshot, while the next request sees removal. See manual-queue-api.md and phase-8-report.md.
+
+## Delivery, dashboard and interface
+
+`modules/delivery` owns pickup/delivery/cancellation transactions. Pickup retains capacity; delivery/cancel terminalizes the matching attempt before shared original-load release and audit. Pickup/cancel and duplicate terminal commands race safely. Matching outcomes replay; invalid backward transitions conflict. See delivery-api.md.
+
+`modules/dashboard` reads all count cards and bounded attention in one snapshot; it joins the current attempt by ID without scoring snapshots. Overdue pending work is labeled due until the worker commits. The React desk uses native fetch, abortable five-second GET polling, explicit command refresh, bounded history/workload and localStorage-backed exact assignment recovery. Advice is invalidated when the job version changes. A 4xx permits a corrected assignment; network/5xx uncertainty retains the command for exact retry. No client-side capacity authority or automatic mutation retry is introduced.
+
+Public seeding uses the same services, including an injected historical clock for a persisted overdue attempt. The worker remains responsible for its expiration. Tests reconcile counters with active attempts and verify contiguous event sequences across the complete seeded demonstration.

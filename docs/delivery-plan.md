@@ -13,8 +13,8 @@ Phase 1 stops at the verified foundation. The following estimates are planning a
 | 7     | feat/assignment-resolution                 | feat(dispatch): accept reject and expire pending attempts; feat(worker): recover overdue attempts on startup; test(dispatch): cover expiry races and release once    | Deterministic clock + DB race/restart tests                   | 1.0          |
 | 8     | feat/manual-reassignment                   | feat(dispatch): expose manual queue and reassign failed jobs; test(dispatch): retain earlier attempts after reassignment                                             | Full expire/reject → reassign integration checks              | 0.4          |
 | 9     | feat/delivery-lifecycle                    | feat(jobs): record pickup delivery and cancellation; test(jobs): enforce lifecycle and append-only audit                                                             | Lifecycle, cancellation races, history consistency tests      | 0.6          |
-| 10    | feat/dispatch-interface                    | feat(ui): add dashboard filters and job history; feat(ui): add recommendations rider actions and manual queue; test(ui): cover error empty and conflict recovery     | RTL + browser reviewer workflow                               | 1.5          |
-| 11    | docs/reviewer-submission                   | chore(seed): add reproducible review scenarios; test: verify end-to-end dispatch demonstration; docs: finalize api design notes and one-page solution                | Fresh setup, full suite, UI walkthrough, presentation render  | 1.0          |
+| 10    | feat/dispatch-dashboard                    | feat(ui): add dashboard filters and job history; feat(ui): add recommendations rider actions and manual queue; test(ui): cover error empty and conflict recovery     | RTL + browser reviewer workflow                               | 1.5          |
+| 11    | feat/reviewer-handoff                      | chore(seed): add reproducible review scenarios; test: verify end-to-end dispatch demonstration; docs: finalize api design notes and one-page solution                | Fresh setup, full suite, UI walkthrough, presentation render  | 1.0          |
 
 Total target: approximately 9.6 hours, excluding review buffer. Actual time will differ. Keep presentation and polish bounded if reliability needs more time.
 
@@ -75,3 +75,9 @@ Completed on `feat/assignment-resolution`: guarded rider responses and expiry, p
 ## Phase 8 checkpoint
 
 Completed on `feat/manual-reassignment`: dedicated queue list/filter/pagination, audit-based waiting time and incomplete-evidence flags, compact latest attempt/failure summaries, plus public investigation/reassignment/override and snapshot-race tests. Assignment/resolution primitives were necessarily implemented in Phases 6/7, so this phase reuses them rather than creating another mutation route. No new collections/indexes/dependencies. Next: `feat/delivery-lifecycle` after Phase 8 review, implementing pickup/delivery/cancellation and release/history protections.
+
+## Final checkpoints
+
+Phases 9–11 were authorized together and implemented sequentially: `feat/delivery-lifecycle`, `feat/dispatch-dashboard`, then `feat/reviewer-handoff`. Each branch contains genuine Conventional Commits and is merged only after applicable verification. Audit/release primitives remained shared rather than duplicated. Dashboard API work is part of Phase 10 because its read model serves the UI directly. Public sample data and final presentation remain Phase 11, after the complete lifecycle is available.
+
+Earlier checkpoints above and phase reports are historical boundaries, not the current completion status. See requirements.md and verification.md for final state. Timing figures are planning estimates, not fabricated measured effort or evidence of the assignment's receipt date. Local commits identify the implementation agent transparently; no remote account or push is attached.

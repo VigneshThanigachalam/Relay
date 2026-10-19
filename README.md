@@ -1,116 +1,91 @@
 # Project RELAY
 
-The Autonomous Dispatch Desk technical assignment. **Implemented through Phase 9:** job/rider management, explainable recommendations, atomic assignment/replay/overrides, responses/automatic expiry with capacity release, and dedicated manual queue investigation with retained attempts and safe reassignment. Pickup, delivery and cancellation now complete the backend lifecycle. Public seeds and the operational dashboard remain pending.
+A working autonomous dispatch desk built with React, TypeScript, Vite, Express, MongoDB/Mongoose and Zod. Dispatchers create jobs, inspect explainable rider scores, reserve capacity, simulate rider responses, investigate exceptions and complete deliveries. An in-process worker expires unanswered assignments automatically. All eleven development phases are implemented; [verification](docs/verification.md) separates tested behavior from environment limitations.
 
-## Review the design
+![Dispatch desk](docs/dispatch-desk.png)
 
-- [Requirements checklist and planned tests](docs/requirements.md)
-- [System design and architecture diagram](docs/architecture.md)
-- [Job and assignment lifecycle](docs/lifecycle.md)
-- [Implemented job API and curl walkthrough](docs/job-api.md)
-- [Implemented rider API and curl walkthrough](docs/rider-api.md)
-- [Implemented recommendation API, scoring and curl walkthrough](docs/recommendation-api.md)
-- [Implemented assignment API, replay and curl walkthrough](docs/assignment-api.md)
-- [Rider response and timeout API/demo](docs/response-timeout-api.md)
-- [Manual queue investigation and reassignment demo](docs/manual-queue-api.md)
-- [Full API contract](docs/api-contract.md) (future endpoints explicitly marked as proposed)
-- [Feature branches, commits and delivery plan](docs/delivery-plan.md)
-- [Assumptions, limitations and next improvements](docs/engineering-notes.md)
-- [Original assignment and extraction](docs/source/README.md)
-- [Phase 1 verification report](docs/phase-1-report.md) (historical)
-- [Phase 2 verification and interview notes](docs/phase-2-report.md) (historical)
-- [Phase 3 verification and interview notes](docs/phase-3-report.md) (historical)
-- [Phase 4 verification and interview notes](docs/phase-4-report.md) (historical)
-- [Phase 5 verification and interview notes](docs/phase-5-report.md) (historical)
-- [Phase 6 verification and interview notes](docs/phase-6-report.md) (historical)
-- [Phase 7 verification and interview notes](docs/phase-7-report.md) (historical)
-- [Phase 8 verification and interview notes](docs/phase-8-report.md)
+## Run locally
 
-## Prerequisites
-
-Node.js **24.x** and npm **11.x** (`.nvmrc` selects 24). Git 2.x. Docker with Compose v2 is the easiest optional local MongoDB setup; alternatively provide MongoDB 8.x configured as a replica set or an Atlas development cluster. A standalone database is insufficient for the transaction-based workflow. The exact dependency graph is pinned by `package-lock.json`; use `npm ci` after checkout. The project does not require external paid integrations.
-
-For Windows, commands below work in Git Bash/WSL; PowerShell users can use `Copy-Item .env.example .env`. Run npm commands from the repository root. To recover all local branches/history from the handoff ZIP, extract it including its `.git` directory; `git log --all --graph --oneline` shows the real history. No GitHub remote is configured. Commits identify the implementation agent transparently.
-
-## Install and configure
+Prerequisites: **Node 24.x, npm 11.x**, Git and **MongoDB 8.x configured as a writable replica set** (local or Atlas). A standalone MongoDB instance cannot run the required transactions. Docker Compose v2 is an optional local recipe; no paid integrations are required.
 
 ```bash
 npm ci
 cp .env.example .env
-```
-
-The API loads the root `.env` using Node's native env-file option. Vite uses a local same-origin proxy; the browser does not receive the database URI. Keep credentials out of `VITE_*` variables and Git.
-
-| Variable                         | Default/example                                | Purpose                                                                        |
-| -------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------ |
-| NODE_ENV                         | development                                    | development, test or production                                                |
-| PORT                             | 4000                                           | API port, integer 1–65535                                                      |
-| MONGODB_URI                      | mongodb://127.0.0.1:27017/relay?replicaSet=rs0 | Required MongoDB URI                                                           |
-| ASSIGNMENT_RESPONSE_THRESHOLD_MS | 7200000                                        | Stored assignment response threshold (1,000–604,800,000 ms); default two hours |
-| TIMEOUT_SCAN_INTERVAL_MS         | 5000                                           | Worker poll interval after scan completion (100–60,000 ms)                     |
-
-The timeout worker now runs automatically after startup and scans immediately for persisted overdue work. For a short demonstration, set threshold `5000` and interval `1000`, restart, then assign a new job. Each new assignment stores its own expiry; restarting with a new threshold will not change existing attempts.
-
-## Local database and startup
-
-The compose file is intended for **local development only**, with MongoDB exposed on loopback and a named data volume. Its healthcheck initializes `rs0` once and waits for a writable primary. The advertised member is `localhost:27017`, because API and Vite run on the host. If you containerize the API later, this hostname setup must change. No authentication is configured in this local recipe.
-
-```bash
+# Optional local database, if Docker is installed:
 docker compose up -d --wait
+# With the configured replica set available:
+npm run seed
 ```
 
-Docker is unavailable in the implementation environment, so this compose recipe remains **unverified**. Phase 2 tests launch a real temporary MongoDB 8.0.17 replica set through a development-only harness and verify actual indexes, transactions and startup checks. This is separate from Docker verification. For a manually managed instance, run `mongod --replSet rs0 --bind_ip 127.0.0.1 --dbpath <your-data-directory>` and initiate `rs0` in mongosh before starting the API. Do not run a second instance over the same port/data directory.
-
-Run in two terminals:
+Run in two terminals from the repository root:
 
 ```bash
-# Terminal 1
 npm run dev:api
 ```
 
 ```bash
-# Terminal 2
 npm run dev:web
 ```
 
-Open `http://127.0.0.1:5173`. It displays a foundation screen only. The API waits for a successful real database connection before listening; missing MongoDB fails startup with a safe error rather than silently substituting memory storage. Before listening, startup verifies a writable replica set with session support, creates declared collections/indexes without dropping other indexes, and runs a real snapshot-transaction read. Standalone MongoDB or failed index creation prevents readiness.
+Open **http://127.0.0.1:5173**. Vite proxies `/api` and `/health` to the API at port 4000. The root `.env` is loaded by Node; database credentials are never browser configuration. Windows users can use Git Bash/WSL or `Copy-Item .env.example .env` in PowerShell.
+
+The seed creates **5 riders and 13 jobs**, including ready, rejected, no-candidate, accepted, delivered and cancelled scenarios. `DEMO-OVERDUE` is a real pending attempt created with an injected historical clock; the startup worker expires it automatically. `DEMO-DEADLINE` illustrates overdue attention. Seed mutations use the normal transaction services, with complete attempts/history. Rerunning preserves existing demo identities, rider edits and progressed jobs; it never drops data or resets work. Use a fresh development database name in MONGODB_URI for a fresh demonstration. Do not use the DEMO-* identity prefix for unrelated data. Run one seed process at a time; interruption can leave a valid partially progressed scenario to finish through the UI. The seed is disabled for NODE_ENV=production.
+
+The compose recipe exposes MongoDB only on loopback with a named volume and no authentication. It advertises `localhost:27017` because API and Vite run on the host. **Docker was unavailable here, so this recipe has not been executed.** Real MongoDB replica-set startup, indexes and transactions were verified separately. Alternatively start `mongod --replSet rs0 --bind_ip 127.0.0.1 --dbpath <data-directory>` and initiate rs0 in mongosh, or supply an Atlas development URI. Do not share a mongod data directory between processes.
+
+## Configuration
+
+| Variable                         | Default                                        | Meaning                                             |
+| -------------------------------- | ---------------------------------------------- | --------------------------------------------------- |
+| NODE_ENV                         | development                                    | development/test/production                         |
+| PORT                             | 4000                                           | API listen port                                     |
+| MONGODB_URI                      | mongodb://127.0.0.1:27017/relay?replicaSet=rs0 | Writable MongoDB replica set                        |
+| ASSIGNMENT_RESPONSE_THRESHOLD_MS | 7200000                                        | Default two hours; 1,000–604,800,000 ms             |
+| TIMEOUT_SCAN_INTERVAL_MS         | 5000                                           | Poll delay after each completed scan; 100–60,000 ms |
+
+Changing the threshold affects new assignments only. For a fresh live timeout, set threshold `5000` and interval `1000`, restart the API and assign `DEMO-TIMEOUT`. Do not respond: it enters manual on the next successful scan, then appears after the UI's next five-second refresh. Use the default threshold for the main interactive delivery demo; five seconds leaves little time to inspect scores and click acceptance.
+
+The API verifies replica-set/session support, a writable primary, declared indexes and a real transaction before listening. Missing/incompatible MongoDB fails startup; no memory substitute is used. `/health/live` reports process liveness; `/health/ready` reports initialized database connectivity, not worker lag. If PORT changes, change Vite's two proxy targets too.
+
+## Reviewer demonstration
+
+1. Start from seeded data. Inspect count cards and attention jobs. Search exact order reference, filter status/zone, then clear filters.
+2. **New job**: create `REVIEW-001` with CENTRAL → NORTH, load 2 and NORMAL priority. Submit the same details again to see reference replay, then open the one job and **Mark ready**.
+3. **Review recommendations**: inspect travel/workload/deadline components and excluded riders. Unavailable Lena, wrong-coverage Noah and occupied Isha cannot take this job. Select a different eligible rider and enter an operational reason to demonstrate an override; **Assign selected rider**.
+4. **Accept assignment** simulates the selected rider. **Record pickup**, then **Complete delivery**. Open Riders to verify released capacity, and inspect the job's events and stored attempt snapshot. A network/503 assignment failure offers **Retry exact assignment**, retaining the command key and payload.
+5. Open `DEMO-REJECT`, recommend/assign, enter a reason and **Reject assignment**. Inspect its manual queue row: reason, age and retained attempt. Open it, review recommendations and **Reassign selected rider**. Accept and finish delivery. Previous attempts remain in history.
+6. Investigate automatically expired `DEMO-OVERDUE` in Manual queue. Its expired attempt, release timestamp and system actor explain startup recovery. Reassign it with the same UI workflow. For a fresh timed demonstration use the short-threshold configuration above.
+7. Open `DEMO-NO-CANDIDATE` to inspect exclusions and no-candidate handling. Cancel `DEMO-NEW` with a reason. View/edit rider availability/capacity/coverage and active workload. Occupied capacity and active coverage cannot be removed.
+
+No manual database edits are needed. Exact normalized reference/code search is intentional. A zone filter matches job pickup OR destination; rider zone filtering matches coverage. Awaiting assignment counts NEW + READY; in progress counts ACCEPTED + PICKED_UP; manual is separate. Dates display in the operator's locale. Recommendations are audited commands, so only GETs poll automatically.
+
+## Verify and build
 
 ```bash
-curl http://127.0.0.1:4000/health/live
-curl http://127.0.0.1:4000/health/ready
-```
-
-Liveness: 200 process status. Readiness: 200 initialized and connected, or 503 unavailable once running. The job, rider, recommendation, assignment, rider-response and manual queue endpoints in their API guides are implemented; other business endpoints return 404. Vite's proxy targets port 4000; if PORT changes, change the two proxy targets in `apps/web/vite.config.ts` as well.
-
-Production compilation and API start:
-
-```bash
+npm run check
+# Separately if needed:
+npm run typecheck
+npm test
 npm run build
 npm start
 ```
 
-The web build lands in `apps/web/dist`; preview with `npm run preview --workspace @relay/web`. Vite preview does not proxy API requests. Production static hosting/reverse proxy is deferred with deployment, which the assignment makes optional.
+`check` runs Prettier, both TypeScript checks, Vitest/Supertest/React Testing Library suites and both production builds. Real database integration tests launch disposable MongoDB 8.0.17 WiredTiger replica sets, including actual transactions/indexes and concurrent requests. The first test run downloads roughly 100 MB; later runs use the cache. `MONGOMS_SYSTEM_BINARY` can point to a matching existing binary. The harness never reads/drops MONGODB_URI, never silently skips database checks and never emulates MongoDB. Fake timers test worker scheduling; fault injection tests uncertain replies and deterministic races without claiming a real network partition.
 
-## Verification
+Production API code is in `apps/api/dist`; frontend assets are in `apps/web/dist`. Vite preview does **not** proxy the API. Production hosting/reverse proxy and deployment are optional and not supplied. The demonstrated local workflow uses Vite dev server plus the API. No authentication is implemented: `dispatcher:demo`, simulated rider IDs and system actors supply visible demo attribution.
 
-```bash
-npm run check
-```
+## Engineering review
 
-Runs Prettier format check, TypeScript checks for both applications, Vitest/Supertest/React Testing Library tests, and both production builds. Individual commands: `npm run format:check`, `npm run typecheck`, `npm test`, `npm run build`. Watch mode: `npm run test:watch --workspace @relay/api` (or `@relay/web`). Prettier is the only formatting tool; this phase does not claim ESLint coverage.
+- [Requirement-by-requirement implementation/test traceability](docs/requirements.md)
+- [Architecture, models, indexes and concurrency decisions](docs/architecture.md)
+- [Lifecycle and reservation rules](docs/lifecycle.md)
+- [API overview and errors](docs/api-contract.md), with complete feature guides linked there
+- [Engineering notes and exactly three next improvements](docs/engineering-notes.md)
+- [One-page manager presentation](docs/solution-one-page.pdf)
+- [Actual verification and limitations](docs/verification.md)
+- [Incremental delivery and branch plan](docs/delivery-plan.md); historical phase reports remain in docs
+- [Original assignment, unchanged, with complete extraction](docs/source/README.md)
 
-Foundation tests cover HTTP/error envelopes, configuration and UI phase labeling. Domain/schema tests cover lifecycle, local invariants and typed audit details. The integration suite launches actual `mongod` processes: a temporary single-node replica set for indexes/transactions and a standalone instance for the rejection check. It verifies parallel unique-index collisions, active-attempt protection, retained expired attempts, append-only mutation guards, four-record rollback, startup readiness and index failures. Phase 3 adds real HTTP integration tests for duplicate/key conflicts, concurrent creates, concurrent ready commands, audit rollback, unknown commit recovery, DTO privacy, filters and history. Phase 4 adds real rider HTTP tests, including controlled stale-read/counter-write races for configuration edits. Phase 5 adds pure eligibility/scoring tests and real recommendation HTTP tests for audit snapshots, no candidates, rollback, concurrent evaluations and job-state conflicts. Phase 6 adds actual reservation/replay/override HTTP checks and concurrent dispatcher, competing-job and public configuration-edit races. Phase 7 adds real response/expiry/release races, duplicate scanner/restart recovery and nonoverlapping worker lifecycle checks. Phase 8 adds queue age/summary/filter validation, public reassignment scenarios, concurrent dispatchers and snapshot-read races. Phase 9 verifies delivery/cancellation, terminal retries, release-once races and transactional rollback.
+This is a modular monolith: thin HTTP controllers, transaction-owning services, pure ranking/lifecycle functions and four workflow collections. Shared helpers cover audit allocation and capacity release. Comments explain non-obvious predicates, retries and boundaries. Native fetch/React state keep the small UI understandable. Additional dependencies beyond the requested stack serve development and verification: tsx, Vite's React plugin, jsdom, type packages, Prettier and mongodb-memory-server-core (which launches real mongod).
 
-The first test run downloads a roughly 100 MB MongoDB 8.0.17 binary and needs network access. Later runs reuse its cache. The harness uses disposable WiredTiger data directories and never loads or drops `MONGODB_URI`. It disables Unix sockets and uses TCP. It fails if MongoDB cannot start; it does not silently skip database tests or replace them with mocks. To use an existing matching executable, configure the harness-supported `MONGOMS_SYSTEM_BINARY` environment variable. `MONGOMS_VERSION` can override the test version; the verified default is 8.0.17. These are test-harness settings, not API configuration.
-
-The API's schema validation is not a substitute for transaction predicates: Mongoose document validation hooks do not run for arbitrary query updates. Assignment now uses guarded updates with sessions; resolution uses the same guarded transaction pattern. MongoDB unique indexes enforce identity and active-attempt constraints even during concurrent inserts; the assignment service now maintains job/rider/attempt consistency on reservation. Response/rejection/expiry release consistency is now implemented; delivery/cancellation uses the same guarded transaction pattern.
-
-## Current API demonstrations
-
-After starting a real replica set and the API, follow [docs/job-api.md](docs/job-api.md#curl-walkthrough). It creates a job, replays it, marks it ready, filters the list and reads its history without manual database edits. Job mutations require `X-Actor-Id`; this supplies demo attribution, not authentication. For rider creation, exact-code lookup, coverage/availability filtering and configuration updates, follow [docs/rider-api.md](docs/rider-api.md#curl-walkthrough). For ranking and the no-candidate Manual Queue path, follow [docs/recommendation-api.md](docs/recommendation-api.md#curl-walkthrough). For assignment, replay and override behavior, follow [docs/assignment-api.md](docs/assignment-api.md#curl-walkthrough). For acceptance, rejection, automatic expiry, restart recovery and reassignment, follow [docs/response-timeout-api.md](docs/response-timeout-api.md#curl-demonstration). For the dedicated manual queue and investigation workflow, follow [docs/manual-queue-api.md](docs/manual-queue-api.md#reviewer-walkthrough). The current React screen is a phase indicator, not the operational dashboard.
-
-## Reviewer workflow and remaining submission work
-
-The full [reviewer demonstration](docs/requirements.md#reviewer-demonstration-planned-for-the-final-phase) will cover create/replay → ready → recommend/override → assign → accept → pickup → deliver, plus reject/timeout → manual → reassignment. The reviewer must be able to run it without database edits. The seed command, complete demonstration instructions, final API examples and one-page solution PDF will be added after business features work. There is no public seed command yet; test fixtures are not the reviewer demo data.
-
-Libraries beyond the requested stack: `tsx` runs API TypeScript in development; `@vitejs/plugin-react` handles React development/build integration; `jsdom` provides the RTL DOM; type packages provide compile-time types; Prettier gives reproducible formatting; development-only `mongodb-memory-server-core` launches real temporary MongoDB processes for repeatable database tests (no install-time binary download). No routing/state framework, Redis, Kafka or microservice infrastructure is introduced.
+The handoff ZIP includes `.git` and all retained feature branches. Extract hidden files too, then run `git log --all --graph --oneline`. Commits use the transparent local identity **Codex Implementation Agent <codex@local.invalid>**. No GitHub account, remote push or deployment is attached. Preserve this history when moving to your own repository; configure your own author for future commits.

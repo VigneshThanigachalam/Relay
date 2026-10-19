@@ -111,4 +111,4 @@ curl -sS "http://127.0.0.1:4000/api/v1/jobs/$JOB_ID/history"
 curl -sS "http://127.0.0.1:4000/api/v1/riders/$RIDER_ID"
 ```
 
-Expect the job absent from manual queue, one new active reservation, the earlier failed attempt retained and the replacement ACCEPTED. An old expired/rejected attempt ID cannot accept it. Pickup/delivery/cancellation are the next feature; this checkpoint does not yet complete the delivery lifecycle.
+Expect the job absent from manual queue, one new active reservation, the earlier failed attempt retained and the replacement ACCEPTED. An old expired/rejected attempt ID cannot accept it. Continue with the pickup/delivery commands in delivery-api.md, or use the complete React workflow in README.md.

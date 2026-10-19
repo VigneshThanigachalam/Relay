@@ -1,6 +1,6 @@
 # Job and assignment lifecycle
 
-Phase 2 implements and tests the pure transition tables, expiry boundary and capacity-state invariants. Phase 3 adds real create, detail/history and guarded NEW → READY commands; create/ready audit writes share the state transaction. Other command/transaction workflows in the table remain planned. Ready replay is handled by the service before the pure transition table; it never resets later states. Use explicit command endpoints and guarded services; never expose a generic unrestricted PATCH status endpoint.
+All transitions below are implemented and verified through guarded service commands. Ready replay is handled before the pure transition table and never resets later states. Explicit endpoints prevent unrestricted status edits. Matching cancellation retries require the same trimmed reason; changed reasons conflict.
 
 ```mermaid
 stateDiagram-v2
@@ -61,13 +61,13 @@ Each evaluation is audited; request retries may create another snapshot. Audit i
 
 READY/MANUAL assignment now transitions to AWAITING_CONFIRMATION with a new PENDING attempt and both active pointers. It clears manualReason, increments version once and reserves the original job load plus one active-job slot. Successful audit includes a fresh recommendation snapshot, assignment event, optional reassignment link and optional override reason. All effects commit or roll back together.
 
-Replay checks receipt identity before lifecycle legality; it returns the original attempt/current job without another increment. Other commands against active/terminal jobs conflict and remain visible through failure events. expiresAt is captured from configuration; acceptance/rejection/expiry and release-once are not implemented by this phase. The stored deadline alone does not execute a transition.
+Replay checks receipt identity before lifecycle legality; it returns the original attempt/current job without another increment. Other commands against active/terminal jobs conflict and remain visible through failure events. expiresAt is captured from configuration; the response/expiry services below execute the guarded outcomes.
 
 ## Phase 7 response and expiry implementation
 
 The accept/reject/expire rules above are now implemented in dispatch/resolution.ts with guarded transactions and explicit post-commit late-response errors. Accepted work retains reservation. Rejection/expiry terminalizes once, validates/decrements original load and clears job pointers while entering manual. Same rejected reason or matching accepted outcome replays; expired response IDs conflict without another release. Real reassignment tests prove old IDs cannot change new work.
 
-The scanner handles persisted due PENDING attempts only. It runs at startup, limits/serializes each batch, retries failures and schedules after completion. Deadline equality and both race outcomes are tested; driver retry captures a fresh time. Pickup/delivery/cancellation routes remain planned, so their lifecycle arrows above are still design commitments.
+The scanner handles persisted due PENDING attempts only. It runs at startup, limits/serializes each batch, retries failures and schedules after completion. Deadline equality and both race outcomes are tested; driver retry captures a fresh time. Pickup/delivery/cancellation are implemented in delivery/service.ts with the same transaction and release predicates.
 
 ## Phase 8 queue investigation
 

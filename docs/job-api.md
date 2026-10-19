@@ -1,6 +1,6 @@
 # Implemented job API
 
-Phase 3 exposes five job operations under `/api/v1/jobs`. Rider/assignment/delivery/dashboard operations in the full contract remain planned. Run a MongoDB replica set and the API using the root README. No public seed command is needed for the job-only walkthrough below.
+Job management exposes five operations under `/api/v1/jobs`; delivery and dispatch commands are documented in their linked guides. All operations in the full contract are implemented. Run a MongoDB replica set and the API using the root README. No public seed command is needed for the job-only walkthrough below.
 
 ## Headers and common conventions
 
@@ -82,7 +82,7 @@ This example illustrates the response shape; a real created job has at least its
 | 503    | DEPENDENCY_UNAVAILABLE              | Database unavailable, bounded operation/retry failure, or unresolved creation outcome               |
 | 500    | INTERNAL_ERROR                      | Unexpected implementation/storage failure; no private error message returned                        |
 
-Example error: `{"error":{"code":"VALIDATION_ERROR","message":"Invalid request","details":[{"path":"deadlineAt","message":"Deadline must be in the future for a new job"}]},"requestId":"server-generated-id"}`. Database query limits are 5 seconds and transaction/retry budget is 15 seconds; these differ from the future two-hour rider response threshold.
+Example error: `{"error":{"code":"VALIDATION_ERROR","message":"Invalid request","details":[{"path":"deadlineAt","message":"Deadline must be in the future for a new job"}]},"requestId":"server-generated-id"}`. Database query limits are 5 seconds and transaction/retry budget is 15 seconds; these differ from the separately configured two-hour rider response threshold.
 
 ## Curl walkthrough
 
