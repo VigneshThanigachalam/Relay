@@ -16,7 +16,8 @@ import {
   type ListJobsInput,
   type Pagination,
 } from './contracts.js';
-import { attemptDto, eventDto, jobDto } from './dto.js';
+import { jobDto } from './dto.js';
+import { attemptDto, eventDto } from '../history/dto.js';
 
 type JobDocument = HydratedDocument<JobRecord>;
 type Dependencies = { connection: Connection; models: PersistenceModels; clock?: Clock };
