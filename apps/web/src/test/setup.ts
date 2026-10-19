@@ -3,3 +3,12 @@ import { cleanup } from '@testing-library/react';
 import { afterEach } from 'vitest';
 
 afterEach(cleanup);
+
+// jsdom has no native dialog rendering/focus engine. Emulate visibility only;
+// real focus trapping, Escape and return-focus are checked in Chromium.
+HTMLDialogElement.prototype.showModal = function () {
+  this.setAttribute('open', '');
+};
+HTMLDialogElement.prototype.close = function () {
+  this.removeAttribute('open');
+};

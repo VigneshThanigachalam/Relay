@@ -2,7 +2,7 @@
 
 A working autonomous dispatch desk built with React, TypeScript, Vite, Express, MongoDB/Mongoose and Zod. Dispatchers create jobs, inspect explainable rider scores, reserve capacity, simulate rider responses, investigate exceptions and complete deliveries. An in-process worker expires unanswered assignments automatically. All eleven development phases are implemented; [verification](docs/verification.md) separates tested behavior from environment limitations.
 
-![Dispatch desk](docs/dispatch-desk.png)
+The refined interface keeps queue rows visible during background refresh, preserves unsaved rider edits, and shows action-specific progress plus success/error notifications. Details open in a keyboard-accessible side panel. See [interface decisions and requirement review](docs/ui-review.md).
 
 ## Run locally
 
@@ -27,7 +27,17 @@ npm run dev:api
 npm run dev:web
 ```
 
-Open **http://127.0.0.1:5173**. Vite proxies `/api` and `/health` to the API at port 4000. The root `.env` is loaded by Node; database credentials are never browser configuration. Windows users can use Git Bash/WSL or `Copy-Item .env.example .env` in PowerShell.
+Open **http://127.0.0.1:5173**. Vite proxies `/api` and `/health` to the API at port 4000. The root `.env` is loaded by Node; database credentials are never browser configuration. Windows users can use Git Bash/WSL or `Copy-Item .env.example .env` in PowerShell. Run every npm command from the folder containing the root `package.json`, for example:
+
+```powershell
+Set-Location "C:\path\to\project-relay"
+node --version
+npm --version
+npm ci
+npm run seed
+```
+
+Use Node 24.x/npm 11.x and configure the root `.env` first. With an existing local MongoDB service, Docker is unnecessary: use its writable `rs0` replica set and `MONGODB_URI=mongodb://localhost:27017/relay?replicaSet=rs0`. Compass is a client for that service. The database is created by the first successful seed writes; creating an empty database manually is unnecessary. If seed fails, its message identifies the configuration, connection/initialization or demo-scenario stage and the underlying error. Resolve that cause before starting the UI. An `esbuild.exe` file-lock error during `npm ci` requires closing the project's running Vite/esbuild process before retrying installation; a partial install cannot run the seed.
 
 The seed creates **5 riders and 13 jobs**, including ready, rejected, no-candidate, accepted, delivered and cancelled scenarios. `DEMO-OVERDUE` is a real pending attempt created with an injected historical clock; the startup worker expires it automatically. `DEMO-DEADLINE` illustrates overdue attention. Seed mutations use the normal transaction services, with complete attempts/history. Rerunning preserves existing demo identities, rider edits and progressed jobs; it never drops data or resets work. Use a fresh development database name in MONGODB_URI for a fresh demonstration. Do not use the DEMO-* identity prefix for unrelated data. Run one seed process at a time; interruption can leave a valid partially progressed scenario to finish through the UI. The seed is disabled for NODE_ENV=production.
 
@@ -84,8 +94,8 @@ Production API code is in `apps/api/dist`; frontend assets are in `apps/web/dist
 - [One-page manager presentation](docs/solution-one-page.pdf)
 - [Actual verification and limitations](docs/verification.md)
 - [Incremental delivery and branch plan](docs/delivery-plan.md); historical phase reports remain in docs
-- [Original assignment, unchanged, with complete extraction](docs/source/README.md)
+- Original assignment and paragraph extraction are supplied separately in the development handoff; they are excluded from this public repository.
 
 This is a modular monolith: thin HTTP controllers, transaction-owning services, pure ranking/lifecycle functions and four workflow collections. Shared helpers cover audit allocation and capacity release. Comments explain non-obvious predicates, retries and boundaries. Native fetch/React state keep the small UI understandable. Additional dependencies beyond the requested stack serve development and verification: tsx, Vite's React plugin, jsdom, type packages, Prettier and mongodb-memory-server-core (which launches real mongod).
 
-The handoff ZIP includes `.git` and all retained feature branches. Extract hidden files too, then run `git log --all --graph --oneline`. Commits use the transparent local identity **Codex Implementation Agent <codex@local.invalid>**. No GitHub account, remote push or deployment is attached. Preserve this history when moving to your own repository; configure your own author for future commits.
+The handoff ZIP includes `.git` and all retained feature branches. Extract hidden files too, then run `git log --all --graph --oneline`. Commits use the transparent local identity **Codex Implementation Agent <codex@local.invalid>**. The public repository is [VigneshThanigachalam/Relay](https://github.com/VigneshThanigachalam/Relay). Publishing through the GitHub connection creates new publication commits on the existing remote history; the exact local feature commits remain in the handoff ZIP. See [publication notes](docs/github-publication.md). Configure your own author for future local commits. No deployment is supplied.

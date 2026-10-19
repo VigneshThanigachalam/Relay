@@ -1,5 +1,7 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { request, message } from './api';
+import { Icon } from './Icon';
+import { useNotify } from './feedback';
 import { ErrorBox, label } from './shared';
 import { zones, type Job, type Rider } from './types';
 export function ZoneField({
@@ -24,40 +26,73 @@ export function ZoneField({
 }
 function MutationForm({
   title,
+  description,
+  submitLabel,
   children,
   submit,
   done,
 }: {
   title: string;
+  description: string;
+  submitLabel: string;
   children: ReactNode;
-  submit: (data: FormData) => Promise<void>;
+  submit: (data: FormData) => Promise<{ title: string; description: string }>;
   done: () => void;
 }) {
   const [busy, setBusy] = useState(false),
-    [error, setError] = useState('');
+    [error, setError] = useState(''),
+    [dirty, setDirty] = useState(false);
+  const running = useRef(false);
+  const notify = useNotify();
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy) return;
+    if (running.current) return;
+    running.current = true;
     const data = new FormData(event.currentTarget);
     setBusy(true);
     setError('');
     try {
-      await submit(data);
+      const notice = await submit(data);
+      setDirty(false);
+      notify({ ...notice, type: 'success' });
       done();
     } catch (e) {
-      setError(message(e));
+      const description = message(e);
+      setError(description);
+      notify({ type: 'error', title: 'Changes could not be saved', description });
     } finally {
+      running.current = false;
       setBusy(false);
     }
   }
   return (
-    <form aria-label={title} onSubmit={(e) => void onSubmit(e)} className="panel form-panel">
-      <h2>{title}</h2>
+    <form
+      aria-label={title}
+      aria-busy={busy}
+      onChange={() => setDirty(true)}
+      onSubmit={(e) => void onSubmit(e)}
+      className="form-panel"
+    >
+      <div className="form-heading">
+        <span className="section-kicker">OPERATIONS</span>
+        <h2>{title}</h2>
+        <p>{description}</p>
+      </div>
       <fieldset disabled={busy}>
         {children}
-        <button className="primary" type="submit">
-          {busy ? 'Saving…' : 'Save'}
-        </button>
+        <div className="form-footer">
+          <span>
+            {busy
+              ? 'Please wait while your changes are recorded…'
+              : dirty
+                ? 'You have unsaved changes'
+                : 'Changes are validated before saving'}
+          </span>
+          <button className="primary" type="submit">
+            {busy ? <Icon name="loader" className="spin" /> : <Icon name="check" />}
+            {busy ? 'Saving…' : submitLabel}
+          </button>
+        </div>
       </fieldset>
       {error && <ErrorBox error={error} />}
     </form>
@@ -68,10 +103,12 @@ export function JobForm({ done, open }: { done: () => void; open: (id: string) =
   return (
     <MutationForm
       title="Create delivery job"
+      description="Add the delivery details. You can review riders before assigning."
+      submitLabel="Create job"
       done={done}
       submit={async (data) => {
         const deadline = str(data, 'deadlineAt');
-        const result = await request<{ data: Job }>('/jobs', {
+        const result = await request<{ data: Job; replayed: boolean }>('/jobs', {
           method: 'POST',
           body: {
             orderReference: str(data, 'orderReference'),
@@ -83,9 +120,19 @@ export function JobForm({ done, open }: { done: () => void; open: (id: string) =
           },
         });
         open(result.data.id);
+        return {
+          title: result.replayed ? 'Job already exists' : 'Delivery job created',
+          description: `${result.data.orderReference} · ${result.replayed ? 'Opened the existing delivery.' : 'Ready for your dispatch review.'}`,
+        };
       }}
     >
-      <p className="muted">Repeated references with the same details return the existing job.</p>
+      <div className="form-callout">
+        <Icon name="shield" />
+        <p>
+          Duplicate-safe by design. Repeated references with identical details open the existing
+          delivery.
+        </p>
+      </div>
       <label>
         Order reference
         <input name="orderReference" required maxLength={80} placeholder="ORDER-1042" />
@@ -120,6 +167,8 @@ export function RiderForm({ rider, done }: { rider?: Rider; done: () => void }) 
     <MutationForm
       key={rider?.id ?? 'new'}
       title={rider ? `Edit ${rider.code}` : 'Create rider'}
+      description="Keep availability, coverage and capacity accurate for dispatch."
+      submitLabel={rider ? 'Save changes' : 'Add rider'}
       done={done}
       submit={async (data) => {
         await request(rider ? `/riders/${rider.id}` : '/riders', {
@@ -133,6 +182,10 @@ export function RiderForm({ rider, done }: { rider?: Rider; done: () => void }) 
             capacityUnits: Number(data.get('capacityUnits')),
           },
         });
+        return {
+          title: rider ? 'Rider details saved' : 'Rider added',
+          description: `${str(data, 'name')} · Availability, coverage and capacity are up to date.`,
+        };
       }}
     >
       {!rider && (
@@ -173,6 +226,7 @@ export function RiderForm({ rider, done }: { rider?: Rider; done: () => void }) 
       <p className="muted">
         Reserved capacity is managed by assignments. Active delivery coverage cannot be removed.
       </p>
+      <p className="field-caption">Service zones</p>
       <div className="checks" role="group" aria-label="Service zones">
         {zones.map((z) => (
           <label key={z}>

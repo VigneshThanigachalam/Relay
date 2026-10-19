@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export class ApiError extends Error {
   constructor(
@@ -53,28 +53,62 @@ export const message = (error: unknown) =>
     ? `${error.message} [${error.code}]${error.requestId ? ` · Request ${error.requestId}` : ''}`
     : 'Could not reach the API. Check the connection and retry the same action.';
 
-// Abort old reads when the selected row/filter changes. Poll only reads; a
-// recommendation is an audited command and must never run on a timer.
-export function useResource<T>(path: string, revision = 0) {
-  const [state, setState] = useState<{ data?: T; error?: string; loading: boolean }>({
-    loading: true,
+type ResourceState<T> = {
+  scope: string;
+  dataPath: string;
+  data?: T;
+  error?: string | undefined;
+  fetching: boolean;
+  updatedAt: number | null;
+  settledRevision: number;
+};
+// Retain a successful snapshot during revalidation. Changing scope (e.g. jobs
+// to riders) clears it; filters within an explicitly shared scope keep context.
+export function useResource<T>(path: string, revision = 0, scope = path) {
+  const [state, setState] = useState<ResourceState<T>>({
+    scope,
+    dataPath: path,
+    fetching: true,
+    updatedAt: null,
+    settledRevision: -1,
   });
   const [retry, setRetry] = useState(0);
+  const writeEpoch = useRef(0);
   useEffect(() => {
     const controller = new AbortController();
     let fetching = false;
-    setState({ loading: true });
     const read = async () => {
       if (fetching) return;
       fetching = true;
+      const epoch = writeEpoch.current;
+      setState((old) =>
+        old.scope === scope
+          ? { ...old, fetching: true }
+          : { scope, dataPath: path, fetching: true, updatedAt: null, settledRevision: -1 },
+      );
       try {
         const data = await request<T>(path, {
           signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]),
         });
-        if (!controller.signal.aborted) setState({ data, loading: false });
+        // An authoritative mutation response must not be overwritten by a GET
+        // that started before the mutation completed, even if it arrives later.
+        if (!controller.signal.aborted && epoch === writeEpoch.current)
+          setState({
+            scope,
+            dataPath: path,
+            data,
+            fetching: false,
+            updatedAt: Date.now(),
+            settledRevision: revision,
+          });
       } catch (error) {
-        if (!controller.signal.aborted)
-          setState((old) => ({ ...old, loading: false, error: message(error) }));
+        if (!controller.signal.aborted && epoch === writeEpoch.current)
+          setState((old) => ({
+            ...old,
+            error: message(error),
+            fetching: false,
+            settledRevision: revision,
+          }));
       } finally {
         fetching = false;
       }
@@ -85,9 +119,35 @@ export function useResource<T>(path: string, revision = 0) {
       controller.abort();
       clearInterval(timer);
     };
-  }, [path, revision, retry]);
+  }, [path, scope, revision, retry]);
   const reload = useCallback(() => setRetry((n) => n + 1), []);
-  return { ...state, reload };
+  const replace = useCallback(
+    (data: T) => {
+      writeEpoch.current++;
+      setState({
+        scope,
+        dataPath: path,
+        data,
+        fetching: false,
+        updatedAt: Date.now(),
+        settledRevision: revision,
+      });
+    },
+    [scope, path, revision],
+  );
+  const same = state.scope === scope;
+  const data = same ? state.data : undefined;
+  return {
+    data,
+    error: same ? state.error : undefined,
+    loading: !data && (!same || state.fetching),
+    refreshing: !!data && state.fetching,
+    stale: !!data && state.dataPath !== path,
+    updatedAt: same ? state.updatedAt : null,
+    settledRevision: same ? state.settledRevision : -1,
+    reload,
+    replace,
+  };
 }
 export type AssignmentCommand = { key: string; body: { riderId: string; overrideReason?: string } };
 const commandKey = (id: string) => `relay:assignment:${id}`;
