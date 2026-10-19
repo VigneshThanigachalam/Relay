@@ -381,3 +381,166 @@ describe('queue bounds, filters and incomplete evidence', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+function barrier() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+describe('public investigation and reassignment workflow', () => {
+  it.each(['reject', 'expire'] as const)(
+    'investigates a real %s entry, reassigns with a new key, preserves history and accepts the new ID',
+    async (outcome) => {
+      const riderId = await rider();
+      const id = await readyJob();
+      const first = (await assign(id, riderId)).body.data.assignment;
+      if (outcome === 'reject') await reject(first.id);
+      else {
+        now = new Date(first.expiresAt);
+        await resolution.expire(first.id);
+      }
+      const row = (await queue()).body.data[0];
+      expect(row.id).toBe(id);
+      expect(row.latestAttempt.id).toBe(first.id);
+      expect(row.manualReason).toBe(outcome === 'reject' ? 'RIDER_REJECTED' : 'RESPONSE_TIMEOUT');
+      const before = await request(app).get(`/api/v1/jobs/${row.id}/history`);
+      expect(before.body.data.attempts).toHaveLength(1);
+      expect(
+        (await post(`/api/v1/jobs/${row.id}/recommendations`, {})).body.data.eligible[0].riderId,
+      ).toBe(riderId);
+      const next = await assign(row.id, riderId, 'new-manual-action');
+      expect(next.status).toBe(201);
+      expect((await queue()).body.pagination.total).toBe(0);
+      const replay = await assign(row.id, riderId, 'new-manual-action');
+      expect(replay.status).toBe(200);
+      expect(replay.body.data.assignment.id).toBe(next.body.data.assignment.id);
+      expect((await post(`/api/v1/assignments/${first.id}/accept`, {})).status).toBe(409);
+      expect(
+        (await post(`/api/v1/assignments/${next.body.data.assignment.id}/accept`, {})).status,
+      ).toBe(200);
+      const history = await request(app).get(`/api/v1/jobs/${id}/history`);
+      expect(history.body.data.attempts.map((a: { status: string }) => a.status)).toEqual([
+        outcome === 'reject' ? 'REJECTED' : 'EXPIRED',
+        'ACCEPTED',
+      ]);
+      expect(
+        history.body.data.events.filter((event: { type: string }) => event.type === 'REASSIGNED'),
+      ).toHaveLength(1);
+      const workload = await request(app).get(`/api/v1/riders/${riderId}`);
+      expect(workload.body.data).toMatchObject({
+        reservedUnits: 2,
+        activeJobCount: 1,
+        availableUnits: 3,
+      });
+    },
+  );
+  it('dispatches a no-candidate entry once a rider exists without fabricating an older assignment', async () => {
+    const id = await readyJob();
+    await post(`/api/v1/jobs/${id}/recommendations`, {});
+    expect((await queue()).body.data[0].latestAttempt).toBeNull();
+    const riderId = await rider();
+    const next = await assign(id, riderId, 'first-real-assignment');
+    expect(next.status).toBe(201);
+    expect((await queue()).body.data).toEqual([]);
+    expect(await models.Assignment.countDocuments({ jobId: id })).toBe(1);
+    expect(await models.JobEvent.countDocuments({ jobId: id, type: 'REASSIGNED' })).toBe(0);
+  });
+  it('shows a rejected override command on the queue, then records a valid non-top reassignment reason', async () => {
+    const firstRider = await rider('R-001');
+    const secondRider = await rider('R-002');
+    const id = await readyJob();
+    const first = (await assign(id, firstRider)).body.data.assignment;
+    await reject(first.id);
+    const rejected = await assign(id, secondRider, 'manual-override');
+    expect(rejected.status).toBe(409);
+    expect((await queue()).body.data[0].latestAssignmentFailure.code).toBe(
+      'OVERRIDE_REASON_REQUIRED',
+    );
+    const next = await assign(id, secondRider, 'manual-override', 'Customer requested this rider');
+    expect(next.status).toBe(201);
+    expect((await queue()).body.data).toEqual([]);
+    const history = await request(app).get(`/api/v1/jobs/${id}/history`);
+    expect(
+      history.body.data.events.find((event: { type: string }) => event.type === 'MANUAL_OVERRIDE')
+        .details,
+    ).toMatchObject({
+      recommendedRiderId: firstRider,
+      chosenRiderId: secondRider,
+      reason: 'Customer requested this rider',
+    });
+  });
+  it('allows one of eight manual reassignment commands and retains seven visible conflicts without leaking capacity', async () => {
+    const riderId = await rider();
+    const id = await readyJob();
+    const first = (await assign(id, riderId)).body.data.assignment;
+    await reject(first.id);
+    expect((await queue()).body.pagination.total).toBe(1);
+    const responses = await Promise.all(
+      Array.from({ length: 8 }, (_, i) => assign(id, riderId, `manual-${i}`)),
+    );
+    expect(responses.filter((res) => res.status === 201)).toHaveLength(1);
+    expect(
+      responses.filter(
+        (res) => res.status === 409 && res.body.error.code === 'JOB_ALREADY_ASSIGNED',
+      ),
+    ).toHaveLength(7);
+    expect((await queue()).body.data).toEqual([]);
+    expect(await models.Assignment.countDocuments({ jobId: id })).toBe(2);
+    expect(await models.Assignment.countDocuments({ jobId: id, active: true })).toBe(1);
+    expect(await models.JobEvent.countDocuments({ jobId: id, type: 'ASSIGNMENT_FAILED' })).toBe(7);
+    expect((await models.Rider.findById(riderId).orFail()).reservedUnits).toBe(2);
+  });
+  it('keeps total, membership and summaries on one snapshot when reassignment commits between queue reads', async () => {
+    const riderId = await rider();
+    const id = await readyJob();
+    const first = (await assign(id, riderId)).body.data.assignment;
+    await reject(first.id);
+    const reached = barrier();
+    const resume = barrier();
+    const original = models.Job.collection.countDocuments.bind(models.Job.collection);
+    const gate = vi
+      .spyOn(models.Job.collection, 'countDocuments')
+      .mockImplementationOnce(async (...args) => {
+        const total = await original(...args); // The real first read establishes the snapshot.
+        reached.release();
+        await resume.promise;
+        return total;
+      });
+    const reading = queue().then((res) => res);
+    try {
+      await reached.promise;
+      expect((await assign(id, riderId, 'concurrent-reassignment')).status).toBe(201);
+      resume.release();
+      const snapshot = await reading;
+      expect(snapshot.status).toBe(200);
+      expect(snapshot.body.pagination.total).toBe(1);
+      expect(snapshot.body.data[0]).toMatchObject({
+        id,
+        status: 'MANUAL_QUEUE',
+        latestAttempt: { id: first.id, status: 'REJECTED' },
+      });
+      expect((await queue()).body).toMatchObject({ data: [], pagination: { total: 0 } });
+    } finally {
+      resume.release();
+      gate.mockRestore();
+      await reading;
+    }
+  });
+  it('returns a safe dependency error when a summary query times out without modifying the queue', async () => {
+    const job = await seedManualJob();
+    vi.spyOn(models.JobEvent.collection, 'aggregate').mockImplementationOnce(() => {
+      throw new mongoose.mongo.MongoServerError({
+        message: 'private diagnostic fixture',
+        code: 50,
+      });
+    });
+    const res = await queue();
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe('DEPENDENCY_UNAVAILABLE');
+    expect(JSON.stringify(res.body)).not.toContain('private diagnostic');
+    expect((await models.Job.findById(job.id).orFail()).status).toBe('MANUAL_QUEUE');
+    expect(await models.JobEvent.countDocuments()).toBe(1);
+  });
+});
