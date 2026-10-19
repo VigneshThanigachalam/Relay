@@ -1,6 +1,6 @@
 # API contract and implementation status
 
-Implemented through Phase 5: health, job create/list/detail/ready/history, rider create/list/detail/update, and job recommendations. The [job guide](job-api.md), [rider guide](rider-api.md) and [recommendation guide](recommendation-api.md) give tested contracts and walkthroughs. Assignment, delivery-update, dedicated manual-queue and dashboard endpoints remain **proposed**. The existing job status filter can list manual jobs now.
+Implemented through Phase 6: health, job create/list/detail/ready/history, rider configuration/workload, recommendations and atomic assignment/reservation. The [job](job-api.md), [rider](rider-api.md), [recommendation](recommendation-api.md) and [assignment](assignment-api.md) guides give tested contracts and walkthroughs. Rider responses, delivery updates, dedicated manual-queue summaries and dashboard endpoints remain **proposed**. The job status filter can list manual jobs; assignment accepts READY/MANUAL jobs now.
 
 JSON over HTTP. IDs are MongoDB ObjectId strings; timestamps are UTC ISO 8601. Payloads reject unknown fields. `X-Actor-Id` is required for user-initiated business mutations (1–80 characters); the demo UI will send `dispatcher:demo` or `rider:<id>`. This is simulated attribution, not authentication. Generate one `Idempotency-Key` per assignment user action and reuse on network retries (1–128 characters). Server returns `X-Request-Id` on every response.
 
@@ -133,3 +133,7 @@ PATCH writes only editable fields and server provenance/time, never workload cou
 ## Implemented recommendation policy
 
 POST recommendations requires actor, explicit JSON `{}` and no query parameters. Only READY/MANUAL is legal. It returns the v1 snapshot plus jobStatus and appends RIDERS_RECOMMENDED; no candidates moves READY to MANUAL with a second event atomically. Already-manual reevaluation preserves reason/version. It reserves nothing and has no idempotency-key replay contract; retries evaluate again. See recommendation-api.md for the exact matrix, formula, exclusion reasons, rounding, concurrency semantics and curl examples.
+
+## Implemented assignment policy
+
+POST assignments requires actor and Idempotency-Key, strict riderId/optional reason body and no query parameters. Success is `{data:{job,assignment},replayed:false}` with 201, or 200 with replayed:true. Recompute scoring in the transaction; only eligible riders can be reserved, and selecting a non-top rider requires a reason. Job state/pointers, rider counters, new PENDING attempt and events commit together. A matching successful key returns the original attempt/current job before state checks; changed payload conflicts. Known-job business failures get ASSIGNMENT_FAILED separately after rollback; uncertain outcomes are reconciled by receipt or return 503. See assignment-api.md for errors, concurrency/retry semantics and curl examples. Stored expiry is configurable now; actual expiry/response processing is Phase 7.
