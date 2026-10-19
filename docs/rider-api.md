@@ -1,6 +1,6 @@
 # Implemented rider API
 
-Phase 4 exposes create/list/detail/PATCH under `/api/v1/riders`. Start a real MongoDB replica set and the API using the README. Recommendations and assignment/reservation endpoints are still later features. The four existing collections are retained.
+Phase 4 exposes create/list/detail/PATCH under `/api/v1/riders`. Start a real MongoDB replica set and the API using the README. Phase 5 adds the [recommendation endpoint](recommendation-api.md); assignment/reservation remains a later feature. The four existing collections are retained.
 
 ## Common conventions
 

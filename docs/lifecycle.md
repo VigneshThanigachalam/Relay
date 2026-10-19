@@ -50,3 +50,9 @@ For every rider: `reservedUnits = sum(loadUnits for active attempts)` and `activ
 ## Audit events
 
 Events are inserts only and receive per-job sequence numbers in the same transaction. Store user actor (demo `X-Actor-Id`), `system:timeout-worker` for automatic expiry, event type, timestamp, job/attempt IDs and meaningful before/after details. Recommendation/override events store scoring version, ranked candidates and chosen reason; store the snapshot rather than recomputing past explanations using current rider data. Known-job eligibility/assignment conflicts append ASSIGNMENT_FAILED separately after rollback with actor/reason; malformed requests and missing jobs return errors without inventing a job history. Operational history endpoint returns events plus attempts, making every rejected/expired attempt visible after success.
+
+## Phase 5 recommendation behavior
+
+The recommendation command is legal only for READY_FOR_ASSIGNMENT and MANUAL_QUEUE. It records a v1 snapshot without reserving capacity. Zero eligible riders changes READY to MANUAL with NO_ELIGIBLE_RIDER, increments state version and appends a manual-entry event in the same transaction as the recommendation event. Already-manual reevaluation preserves reason/version, even when a new candidate is found; dispatcher assignment remains explicit.
+
+Each evaluation is audited; request retries may create another snapshot. Audit insertion failure rolls back the state and every event. Per-job sequence writes serialize conflicting job changes, while rider reads remain advice without a reservation. See recommendation-api.md for the tested scoring and concurrency policies.

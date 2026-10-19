@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { createJobsService } from './modules/jobs/service.js';
 import { createRidersService } from './modules/riders/service.js';
+import { createRecommendationsService } from './modules/recommendations/service.js';
 import { createPersistenceModels } from './modules/persistence/models.js';
 import { createApp } from './app.js';
 import { parseEnv } from './config/env.js';
@@ -14,9 +15,13 @@ async function start() {
   const models = createPersistenceModels(mongoose.connection);
   const jobs = createJobsService({ connection: mongoose.connection, models });
   const riders = createRidersService({ connection: mongoose.connection, models });
-  const server = createApp({ isReady: isDatabaseReady, jobs, riders }).listen(config.PORT, () => {
-    console.info(`RELAY API listening on port ${config.PORT}`);
-  });
+  const recommendations = createRecommendationsService({ connection: mongoose.connection, models });
+  const server = createApp({ isReady: isDatabaseReady, jobs, riders, recommendations }).listen(
+    config.PORT,
+    () => {
+      console.info(`RELAY API listening on port ${config.PORT}`);
+    },
+  );
   server.on('error', () => {
     console.error('HTTP server failed to listen');
     void disconnectDatabase().finally(() => {
