@@ -67,3 +67,7 @@ Completed on `feat/recommendations`: pure hard eligibility and explainable scori
 ## Phase 6 checkpoint
 
 Completed on `feat/assignment-reservation`: strict canonical assignment commands, atomic job/rider/attempt/audit mutation, durable receipt replay/recovery, override reasons and separate failed-command history. Real concurrent public requests verify same-job conflicts, same-key replay, bounded shared capacity and rider configuration races. Existing partial/unique indexes are reused. Assignment from manual and terminal-fixture retention are included as required primitives; dedicated manual queue summaries and real reject/expire → reassign verification remain Phase 8. No response or worker behavior is claimed. Next: `feat/assignment-resolution` after Phase 6 review.
+
+## Phase 7 checkpoint
+
+Completed on `feat/assignment-resolution`: guarded rider responses and expiry, post-commit late-response conflicts, atomic original-load release, matching outcome replay, persisted due scanning, startup recovery and bounded shutdown. Real MongoDB tests force both acceptance/expiry race winners and fresh-time retries, repeated outcomes, corruption rollback, worker duplicates/failure recovery and real reject/expire → new-attempt acceptance. Scheduler unit checks verify nonoverlap/stop/retry. Next: `feat/manual-reassignment` after Phase 7 review, adding dedicated queue summaries/investigation and broader reassignment demonstration coverage. Delivery/cancellation remains Phase 9.
