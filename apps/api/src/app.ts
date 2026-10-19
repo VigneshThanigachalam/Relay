@@ -9,6 +9,8 @@ import { createRecommendationsRouter } from './modules/recommendations/router.js
 import type { RecommendationsService } from './modules/recommendations/service.js';
 import { createDispatchRouter } from './modules/dispatch/router.js';
 import type { DispatchService } from './modules/dispatch/service.js';
+import { createResolutionRouter } from './modules/dispatch/resolution-router.js';
+import type { ResolutionService } from './modules/dispatch/resolution.js';
 
 type AppDependencies = {
   isReady?: () => boolean;
@@ -16,6 +18,7 @@ type AppDependencies = {
   riders?: RidersService;
   recommendations?: RecommendationsService;
   dispatch?: DispatchService;
+  resolution?: ResolutionService;
 };
 
 export function createApp({
@@ -24,6 +27,7 @@ export function createApp({
   riders,
   recommendations,
   dispatch,
+  resolution,
 }: AppDependencies = {}) {
   // Building the app must not open sockets or connect to MongoDB: Supertest can
   // exercise HTTP contracts while server.ts owns the real process lifecycle.
@@ -62,6 +66,7 @@ export function createApp({
   if (recommendations)
     app.use('/api/v1/jobs', requireReady, createRecommendationsRouter(recommendations));
   if (dispatch) app.use('/api/v1/jobs', requireReady, createDispatchRouter(dispatch));
+  if (resolution) app.use('/api/v1/assignments', requireReady, createResolutionRouter(resolution));
   app.use((req, res) => {
     sendError(req, res, 404, 'ROUTE_NOT_FOUND', 'Route not found');
   });

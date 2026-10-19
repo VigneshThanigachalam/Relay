@@ -3,6 +3,9 @@ import { createJobsService } from './modules/jobs/service.js';
 import { createRidersService } from './modules/riders/service.js';
 import { createRecommendationsService } from './modules/recommendations/service.js';
 import { createDispatchService } from './modules/dispatch/service.js';
+import { createResolutionService } from './modules/dispatch/resolution.js';
+import { createTimeoutScanner } from './modules/worker/timeout-scanner.js';
+import { startTimeoutWorker } from './modules/worker/timeout-worker.js';
 import { createPersistenceModels } from './modules/persistence/models.js';
 import { createApp } from './app.js';
 import { parseEnv } from './config/env.js';
@@ -22,30 +25,46 @@ async function start() {
     models,
     responseThresholdMs: config.ASSIGNMENT_RESPONSE_THRESHOLD_MS,
   });
+  const resolution = createResolutionService({ connection: mongoose.connection, models });
+  const scanner = createTimeoutScanner({ models, resolution });
+  let worker: ReturnType<typeof startTimeoutWorker> | undefined;
+  let stopping = false;
   const server = createApp({
     isReady: isDatabaseReady,
     jobs,
     riders,
     recommendations,
     dispatch,
+    resolution,
   }).listen(config.PORT, () => {
+    if (!stopping)
+      worker = startTimeoutWorker({
+        scan: scanner.scan,
+        intervalMs: config.TIMEOUT_SCAN_INTERVAL_MS,
+      });
     console.info(`RELAY API listening on port ${config.PORT}`);
   });
   server.on('error', () => {
     console.error('HTTP server failed to listen');
-    void disconnectDatabase().finally(() => {
-      process.exitCode = 1;
-    });
+    void Promise.resolve(worker?.stop())
+      .then(() => disconnectDatabase())
+      .catch(() => {})
+      .finally(() => {
+        process.exitCode = 1;
+      });
   });
-  let stopping = false;
   const stop = () => {
     if (stopping) return;
     stopping = true;
     // Stop accepting HTTP work before disconnecting the database; give existing
     // requests a bounded drain period so shutdown cannot hang indefinitely.
     const forceExit = setTimeout(() => process.exit(1), 10000).unref();
+    // Stop polling now and let the current attempt transaction finish. Scanner
+    // checks this stop signal between attempts, rather than draining a full batch.
+    const workerStopped = worker?.stop();
     server.close(() => {
-      void disconnectDatabase()
+      void Promise.resolve(workerStopped)
+        .then(() => disconnectDatabase())
         .then(() => {
           clearTimeout(forceExit);
           process.exitCode = 0;

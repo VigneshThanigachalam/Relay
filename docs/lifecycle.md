@@ -62,3 +62,9 @@ Each evaluation is audited; request retries may create another snapshot. Audit i
 READY/MANUAL assignment now transitions to AWAITING_CONFIRMATION with a new PENDING attempt and both active pointers. It clears manualReason, increments version once and reserves the original job load plus one active-job slot. Successful audit includes a fresh recommendation snapshot, assignment event, optional reassignment link and optional override reason. All effects commit or roll back together.
 
 Replay checks receipt identity before lifecycle legality; it returns the original attempt/current job without another increment. Other commands against active/terminal jobs conflict and remain visible through failure events. expiresAt is captured from configuration; acceptance/rejection/expiry and release-once are not implemented by this phase. The stored deadline alone does not execute a transition.
+
+## Phase 7 response and expiry implementation
+
+The accept/reject/expire rules above are now implemented in dispatch/resolution.ts with guarded transactions and explicit post-commit late-response errors. Accepted work retains reservation. Rejection/expiry terminalizes once, validates/decrements original load and clears job pointers while entering manual. Same rejected reason or matching accepted outcome replays; expired response IDs conflict without another release. Real reassignment tests prove old IDs cannot change new work.
+
+The scanner handles persisted due PENDING attempts only. It runs at startup, limits/serializes each batch, retries failures and schedules after completion. Deadline equality and both race outcomes are tested; driver retry captures a fresh time. Pickup/delivery/cancellation routes remain planned, so their lifecycle arrows above are still design commitments.

@@ -1,6 +1,6 @@
 # System design proposal
 
-Implemented through Phase 6: domain/database foundation, job/rider APIs, pure recommendation scoring with snapshots/manual handling, and atomic assignment/reservation, replay, overrides and failure history. Rider response/release services, worker and operational UI below remain planned. [Lifecycle](lifecycle.md), [API contract](api-contract.md) and [requirements](requirements.md) distinguish implemented and remaining behavior.
+Implemented through Phase 7: domain/database foundation, job/rider APIs, recommendation scoring, atomic assignment/reservation/replay/overrides, rider responses, transactional rejection/expiry release and persisted-deadline polling. Delivery/cancellation, dedicated manual queue summaries and operational UI remain planned. [Lifecycle](lifecycle.md), [API contract](api-contract.md) and [requirements](requirements.md) track the boundary.
 
 ## Components and responsibilities
 
@@ -144,3 +144,11 @@ The service reads job and successful key first. Exact replay returns original at
 Snapshots represent a consistent fleet view, not global serialization of all rider rankings: other unselected riders can change. Hard eligibility/capacity of the selected rider is guarded by its write. Partial active-attempt and job/key unique indexes remain defense in depth. Terminal fixtures verify receipt lifetime/reassignment primitives; the real response/release flow is still Phase 7/8.
 
 Recognized assignment-index/unknown-commit results are resolved from a receipt in a fresh transaction; unresolved outcomes return 503. Auditable known-job business failures append ASSIGNMENT_FAILED only after state rollback, in a separate transaction; failed audit confirmation returns 503. No false failed reservation attempt is fabricated. Tests verify eight-way same-job/same-key races, six jobs sharing limited capacity, both orders of actual public rider configuration conflicts, rollback, private DTOs and receipt recovery. See assignment-api.md and phase-6-report.md.
+
+## Phase 7 resolution and worker implementation
+
+`dispatch/resolution.ts` owns the shared accept/reject/expire transaction. It verifies the attempt/job relationship, replay/outcome and exact current pointers, captures a fresh decision time, conditionally writes job and PENDING/active/unreleased attempt, releases original capacity when terminal, and appends outcome/manual events. `release-reservation.ts` checks local current/resulting counters and guards the decrement within that same transaction. Only the winning terminalization may release. Acceptance retains capacity. The late-response 409 is emitted after expiry commits, not thrown inside its callback.
+
+`worker/timeout-scanner.ts` shortlists at most 100 due PENDING attempts under the existing expiry index, resolves each sequentially, continues individual failures and checks shutdown between attempts. `timeout-worker.ts` scans on startup and uses a new timer only after completion, preventing local overlap. Persisted expiries support restart recovery; duplicate processes are guarded in MongoDB. Polling controls latency, not exact wall-clock execution. Startup starts the worker after listen success; shutdown drains HTTP/current scan before database close under the existing 10-second process budget.
+
+Tests verify forced simultaneous pre-write snapshots for acceptance/expiry with either winner, fresh decision time on real transaction retry, equality expiry, opposing responses, repeated outcomes, duplicate scanners, bounded ordered scans, failure retry and actual reassignment without old-ID interference. Fake timers test scheduler timing; real MongoDB tests cover business outcomes. No production failover or exact-time scheduler guarantee is claimed. See response-timeout-api.md for limits and policy details.

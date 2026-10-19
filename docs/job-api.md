@@ -65,7 +65,7 @@ A guarded status/version update plus the audit append share one transaction. Con
 }
 ```
 
-This example illustrates the response shape; a real created job has at least its creation event. Events sort by per-job sequence. Attempts sort by assignment time and ID. Both arrays use the requested page/size with separate totals; neither is unbounded. Each event includes ID, job ID, sequence, type, UTC time, actor, optional assignment ID and typed details. Attempt DTOs retain outcomes/release timestamps/reasons and recommendation snapshots while excluding request keys/hashes. Assignment creation is implemented in Phase 6; resolution is Phase 7. History reads now cover actual created attempts, while terminal outcomes remain explicit fixtures until resolution is implemented. No event edit/delete endpoint is registered.
+This example illustrates the response shape; a real created job has at least its creation event. Events sort by per-job sequence. Attempts sort by assignment time and ID. Both arrays use the requested page/size with separate totals; neither is unbounded. Each event includes ID, job ID, sequence, type, UTC time, actor, optional assignment ID and typed details. Attempt DTOs retain outcomes/release timestamps/reasons and recommendation snapshots while excluding request keys/hashes. Assignment creation is implemented in Phase 6; resolution is implemented in Phase 7. History now covers actual accepted/rejected/expired attempts and reassignment without relying on terminal fixtures. No event edit/delete endpoint is registered.
 
 ## Errors
 

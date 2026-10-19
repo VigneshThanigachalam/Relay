@@ -1,6 +1,6 @@
 # Assignment and reservation API — Phase 6
 
-Implemented: `POST /api/v1/jobs/:jobId/assignments`. Assign a selected eligible rider to a READY_FOR_ASSIGNMENT or MANUAL_QUEUE job. It reserves load, creates a PENDING attempt, links the job, stores the current scoring snapshot and appends events atomically. Rider acceptance/rejection and automatic expiry/release are Phase 7; passing expiresAt does not yet trigger a worker in this checkpoint. The React screen remains a phase indicator.
+Implemented: `POST /api/v1/jobs/:jobId/assignments`. Assign a selected eligible rider to a READY_FOR_ASSIGNMENT or MANUAL_QUEUE job. It reserves load, creates a PENDING attempt, links the job, stores the current scoring snapshot and appends events atomically. Phase 7 now implements [rider responses and automatic expiry/release](response-timeout-api.md). The React screen remains a phase indicator.
 
 ## Request and responses
 
@@ -121,7 +121,7 @@ Successful assignment records RIDERS_RECOMMENDED and ASSIGNMENT_CREATED with the
 
 A rejected, validated known-job command records ASSIGNMENT_FAILED in a separate transaction after reservation rollback. Details include error code, operational reason (including hard eligibility reasons) and chosen rider ID; actor/time/sequence are retained. These records appear in history as events, not fabricated reservation attempts. Malformed requests/missing jobs do not invent history. Internal/ambiguous infrastructure errors are not reported as definite business failures. If failure auditing cannot be confirmed, the API returns 503. Repeating a rejected request may add another failure event; rejected keys are not deduplicated. A process crash between rollback and failure-audit commit can omit that rejection record unless the caller retries. A normal 404/409 business rejection is returned only after its required failure audit commits.
 
-A failed direct assignment leaves the job's state unchanged. Evaluate recommendations to use the no-candidate automatic manual-entry policy. Dedicated manual queue summaries and the real reject/expire → reassign flow come in later phases; current manual assignment and historical receipt checks are verified with both public no-candidate entry and explicit terminal fixtures.
+A failed direct assignment leaves the job's state unchanged. Evaluate recommendations to use the no-candidate automatic manual-entry policy. Phase 7 now verifies the real reject/expire → reassign flow. Dedicated manual summaries remain later work; current manual assignment and historical receipt checks retain their fixture and public-API coverage.
 
 ## Curl walkthrough
 
@@ -147,6 +147,6 @@ curl -sS "http://127.0.0.1:4000/api/v1/riders/$RIDER_ID"
 curl -sS "http://127.0.0.1:4000/api/v1/jobs/$JOB_ID/history"
 ```
 
-A new key on the same pending job returns 409 JOB_ALREADY_ASSIGNED and adds a visible failure event. To demonstrate override, create a second eligible rider and another READY job; select the non-top rider with a nonblank reason. Do not reuse a successful key with changed payload. There is no public release/reset endpoint in this phase; rider capacity remains reserved while its assignment is active.
+A new key on the same pending job returns 409 JOB_ALREADY_ASSIGNED and adds a visible failure event. To demonstrate override, create a second eligible rider and another READY job; select the non-top rider with a nonblank reason. Do not reuse a successful key with changed payload. Use the Phase 7 rejection/expiry workflow to release pending work; acceptance preserves capacity. No generic reset endpoint is exposed.
 
 Platform references: [MongoDB atomicity](https://www.mongodb.com/docs/manual/core/write-operations-atomicity/), [transaction stale reads/write conflicts](https://www.mongodb.com/docs/v8.0/core/transactions-production-consideration/), [Mongoose 8 update validators](https://mongoosejs.com/docs/8.x/docs/validation.html#update-validators-only-run-for-some-operations). These explain database mechanics; application policies and test results above are repository-specific.
