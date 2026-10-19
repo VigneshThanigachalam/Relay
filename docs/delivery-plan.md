@@ -63,3 +63,7 @@ Completed on `feat/rider-management`: shared transport validation, rider create/
 ## Phase 5 checkpoint
 
 Completed on `feat/recommendations`: pure hard eligibility and explainable scoring v1, a complete simulated travel matrix with conservative fallback, deterministic ranking, recommendation API and audit snapshots. No candidates atomically moves READY into manual; already-manual reevaluation preserves reason/version. Tests cover scoring boundaries, HTTP validation, audit rollback, concurrent evaluations and a controlled job-state race. The endpoint reserves no capacity. Next branch: `feat/assignment-reservation` after Phase 5 review.
+
+## Phase 6 checkpoint
+
+Completed on `feat/assignment-reservation`: strict canonical assignment commands, atomic job/rider/attempt/audit mutation, durable receipt replay/recovery, override reasons and separate failed-command history. Real concurrent public requests verify same-job conflicts, same-key replay, bounded shared capacity and rider configuration races. Existing partial/unique indexes are reused. Assignment from manual and terminal-fixture retention are included as required primitives; dedicated manual queue summaries and real reject/expire → reassign verification remain Phase 8. No response or worker behavior is claimed. Next: `feat/assignment-resolution` after Phase 6 review.

@@ -1,6 +1,6 @@
 # Project RELAY
 
-The Autonomous Dispatch Desk technical assignment. **Implemented through Phase 5:** domain/database foundation, transactional job management, protected rider configuration/workload APIs, and explainable rider recommendations with audit snapshots and no-candidate Manual Queue handling. Assignment/reservation services, timeout worker, demo seeds and the operational dashboard remain pending. Next: atomic assignment and capacity reservation.
+The Autonomous Dispatch Desk technical assignment. **Implemented through Phase 6:** transactional job management, protected rider configuration/workload APIs, explainable recommendations, and atomic assignment/capacity reservation with durable replay, override reasons and failed-command history. Rider responses/timeout release, delivery actions, public seeds and the operational dashboard remain pending. Next: acceptance, rejection and the timeout worker.
 
 ## Review the design
 
@@ -10,6 +10,7 @@ The Autonomous Dispatch Desk technical assignment. **Implemented through Phase 5
 - [Implemented job API and curl walkthrough](docs/job-api.md)
 - [Implemented rider API and curl walkthrough](docs/rider-api.md)
 - [Implemented recommendation API, scoring and curl walkthrough](docs/recommendation-api.md)
+- [Implemented assignment API, replay and curl walkthrough](docs/assignment-api.md)
 - [Full API contract](docs/api-contract.md) (future endpoints explicitly marked as proposed)
 - [Feature branches, commits and delivery plan](docs/delivery-plan.md)
 - [Assumptions, limitations and next improvements](docs/engineering-notes.md)
@@ -18,7 +19,8 @@ The Autonomous Dispatch Desk technical assignment. **Implemented through Phase 5
 - [Phase 2 verification and interview notes](docs/phase-2-report.md) (historical)
 - [Phase 3 verification and interview notes](docs/phase-3-report.md) (historical)
 - [Phase 4 verification and interview notes](docs/phase-4-report.md) (historical)
-- [Phase 5 verification and interview notes](docs/phase-5-report.md)
+- [Phase 5 verification and interview notes](docs/phase-5-report.md) (historical)
+- [Phase 6 verification and interview notes](docs/phase-6-report.md)
 
 ## Prerequisites
 
@@ -35,15 +37,15 @@ cp .env.example .env
 
 The API loads the root `.env` using Node's native env-file option. Vite uses a local same-origin proxy; the browser does not receive the database URI. Keep credentials out of `VITE_*` variables and Git.
 
-| Variable                         | Default/example                                | Purpose                                                                    |
-| -------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------- |
-| NODE_ENV                         | development                                    | development, test or production                                            |
-| PORT                             | 4000                                           | API port, integer 1–65535                                                  |
-| MONGODB_URI                      | mongodb://127.0.0.1:27017/relay?replicaSet=rs0 | Required MongoDB URI                                                       |
-| ASSIGNMENT_RESPONSE_THRESHOLD_MS | 7200000                                        | Future worker response threshold (1,000–604,800,000 ms); default two hours |
-| TIMEOUT_SCAN_INTERVAL_MS         | 5000                                           | Future worker poll interval (100–60,000 ms)                                |
+| Variable                         | Default/example                                | Purpose                                                                        |
+| -------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------ |
+| NODE_ENV                         | development                                    | development, test or production                                                |
+| PORT                             | 4000                                           | API port, integer 1–65535                                                      |
+| MONGODB_URI                      | mongodb://127.0.0.1:27017/relay?replicaSet=rs0 | Required MongoDB URI                                                           |
+| ASSIGNMENT_RESPONSE_THRESHOLD_MS | 7200000                                        | Stored assignment response threshold (1,000–604,800,000 ms); default two hours |
+| TIMEOUT_SCAN_INTERVAL_MS         | 5000                                           | Future worker poll interval (100–60,000 ms)                                    |
 
-Threshold/interval settings are validated now; no worker runs yet. A future reviewer demo will use threshold `5000` and interval `1000` before assigning a new job. Each future attempt stores its own expiry; restarting with a new threshold will not change existing attempts.
+Threshold/interval settings are validated now; no worker runs yet. A future reviewer demo will use threshold `5000` and interval `1000` before assigning a new job. Each new assignment stores its own expiry; restarting with a new threshold will not change existing attempts.
 
 ## Local database and startup
 
@@ -74,7 +76,7 @@ curl http://127.0.0.1:4000/health/live
 curl http://127.0.0.1:4000/health/ready
 ```
 
-Liveness: 200 process status. Readiness: 200 initialized and connected, or 503 unavailable once running. The job, rider and recommendation endpoints in their API guides are implemented; other business endpoints return 404. Vite's proxy targets port 4000; if PORT changes, change the two proxy targets in `apps/web/vite.config.ts` as well.
+Liveness: 200 process status. Readiness: 200 initialized and connected, or 503 unavailable once running. The job, rider, recommendation and assignment endpoints in their API guides are implemented; other business endpoints return 404. Vite's proxy targets port 4000; if PORT changes, change the two proxy targets in `apps/web/vite.config.ts` as well.
 
 Production compilation and API start:
 
@@ -93,15 +95,15 @@ npm run check
 
 Runs Prettier format check, TypeScript checks for both applications, Vitest/Supertest/React Testing Library tests, and both production builds. Individual commands: `npm run format:check`, `npm run typecheck`, `npm test`, `npm run build`. Watch mode: `npm run test:watch --workspace @relay/api` (or `@relay/web`). Prettier is the only formatting tool; this phase does not claim ESLint coverage.
 
-Foundation tests cover HTTP/error envelopes, configuration and UI phase labeling. Domain/schema tests cover lifecycle, local invariants and typed audit details. The integration suite launches actual `mongod` processes: a temporary single-node replica set for indexes/transactions and a standalone instance for the rejection check. It verifies parallel unique-index collisions, active-attempt protection, retained expired attempts, append-only mutation guards, four-record rollback, startup readiness and index failures. Phase 3 adds real HTTP integration tests for duplicate/key conflicts, concurrent creates, concurrent ready commands, audit rollback, unknown commit recovery, DTO privacy, filters and history. Phase 4 adds real rider HTTP tests, including controlled stale-read/counter-write races for configuration edits. Phase 5 adds pure eligibility/scoring tests and real recommendation HTTP tests for audit snapshots, no candidates, rollback, concurrent evaluations and job-state conflicts. Full assignment/capacity-release races remain pending.
+Foundation tests cover HTTP/error envelopes, configuration and UI phase labeling. Domain/schema tests cover lifecycle, local invariants and typed audit details. The integration suite launches actual `mongod` processes: a temporary single-node replica set for indexes/transactions and a standalone instance for the rejection check. It verifies parallel unique-index collisions, active-attempt protection, retained expired attempts, append-only mutation guards, four-record rollback, startup readiness and index failures. Phase 3 adds real HTTP integration tests for duplicate/key conflicts, concurrent creates, concurrent ready commands, audit rollback, unknown commit recovery, DTO privacy, filters and history. Phase 4 adds real rider HTTP tests, including controlled stale-read/counter-write races for configuration edits. Phase 5 adds pure eligibility/scoring tests and real recommendation HTTP tests for audit snapshots, no candidates, rollback, concurrent evaluations and job-state conflicts. Phase 6 adds actual reservation/replay/override HTTP checks and concurrent dispatcher, competing-job and public configuration-edit races. Response/expiry/capacity-release races remain pending.
 
 The first test run downloads a roughly 100 MB MongoDB 8.0.17 binary and needs network access. Later runs reuse its cache. The harness uses disposable WiredTiger data directories and never loads or drops `MONGODB_URI`. It disables Unix sockets and uses TCP. It fails if MongoDB cannot start; it does not silently skip database tests or replace them with mocks. To use an existing matching executable, configure the harness-supported `MONGOMS_SYSTEM_BINARY` environment variable. `MONGOMS_VERSION` can override the test version; the verified default is 8.0.17. These are test-harness settings, not API configuration.
 
-The API's schema validation is not a substitute for transaction predicates: Mongoose document validation hooks do not run for arbitrary query updates. Later services must use guarded updates with sessions and field validators where applicable. MongoDB unique indexes enforce identity and active-attempt constraints even during concurrent inserts; cross-document job/rider/attempt consistency belongs to the services still to be implemented.
+The API's schema validation is not a substitute for transaction predicates: Mongoose document validation hooks do not run for arbitrary query updates. Assignment now uses guarded updates with sessions; resolution services must follow the same pattern. MongoDB unique indexes enforce identity and active-attempt constraints even during concurrent inserts; the assignment service now maintains job/rider/attempt consistency on reservation. Release and response consistency remain later work.
 
 ## Current API demonstrations
 
-After starting a real replica set and the API, follow [docs/job-api.md](docs/job-api.md#curl-walkthrough). It creates a job, replays it, marks it ready, filters the list and reads its history without manual database edits. Job mutations require `X-Actor-Id`; this supplies demo attribution, not authentication. For rider creation, exact-code lookup, coverage/availability filtering and configuration updates, follow [docs/rider-api.md](docs/rider-api.md#curl-walkthrough). For ranking and the no-candidate Manual Queue path, follow [docs/recommendation-api.md](docs/recommendation-api.md#curl-walkthrough). The current React screen is a phase indicator, not the operational dashboard.
+After starting a real replica set and the API, follow [docs/job-api.md](docs/job-api.md#curl-walkthrough). It creates a job, replays it, marks it ready, filters the list and reads its history without manual database edits. Job mutations require `X-Actor-Id`; this supplies demo attribution, not authentication. For rider creation, exact-code lookup, coverage/availability filtering and configuration updates, follow [docs/rider-api.md](docs/rider-api.md#curl-walkthrough). For ranking and the no-candidate Manual Queue path, follow [docs/recommendation-api.md](docs/recommendation-api.md#curl-walkthrough). For assignment, replay and override behavior, follow [docs/assignment-api.md](docs/assignment-api.md#curl-walkthrough). The current React screen is a phase indicator, not the operational dashboard.
 
 ## Reviewer workflow and remaining submission work
 

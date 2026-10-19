@@ -1,6 +1,6 @@
 # Rider recommendation API — Phase 5
 
-Implemented: `POST /api/v1/jobs/:jobId/recommendations`. It evaluates an existing READY_FOR_ASSIGNMENT or MANUAL_QUEUE job, records the result, and returns ranked eligible riders plus excluded riders and their reasons. It never creates an assignment or reserves capacity. Assignment/reservation is Phase 6.
+Implemented: `POST /api/v1/jobs/:jobId/recommendations`. It evaluates an existing READY_FOR_ASSIGNMENT or MANUAL_QUEUE job, records the result, and returns ranked eligible riders plus excluded riders and their reasons. It never creates an assignment or reserves capacity. Assignment/reservation is now implemented in Phase 6; see [assignment-api.md](assignment-api.md).
 
 Send `X-Actor-Id` (trimmed, 1–80 characters), JSON body `{}`, and no query parameters. A valid 24-character ObjectId is required. Success is 200, including an empty fleet/no candidates. A missing job returns 404 JOB_NOT_FOUND; any other job state returns 409 INVALID_TRANSITION. Invalid actor/body/ID/query returns 400 VALIDATION_ERROR. Database failures may return 503 DEPENDENCY_UNAVAILABLE; unexpected errors return a safe 500. Responses include X-Request-Id and Cache-Control: no-store.
 
@@ -70,7 +70,7 @@ Each evaluation appends RIDERS_RECOMMENDED with `details.snapshot`, containing e
 
 If a READY job has no eligible riders, the same transaction changes it to MANUAL_QUEUE, sets NO_ELIGIBLE_RIDER, increments its state version, and appends MANUAL_QUEUE_ENTERED after RIDERS_RECOMMENDED. It remains unassigned and appears in `GET /api/v1/jobs?status=MANUAL_QUEUE`. If already manual, another evaluation preserves its original reason/version and adds only a recommendation event. Finding a rider later keeps the job manual until an explicit assignment command (Phase 6).
 
-The job and all riders are read in one snapshot transaction. Job sequence allocation writes the job document; a concurrent job state change causes retry and a fresh state check. Recommendations do not lock rider documents: a rider may go offline or become full immediately after the read. The future assignment service must recompute and atomically guard eligibility/capacity. An eight-request race and a controlled cancellation-write fixture verify job-side conflict behavior, not an implemented assignment/cancellation API.
+The job and all riders are read in one snapshot transaction. Job sequence allocation writes the job document; a concurrent job state change causes retry and a fresh state check. Recommendations do not lock rider documents: a rider may go offline or become full immediately after the read. The assignment service recomputes and atomically guards eligibility/capacity. An eight-request race and a controlled cancellation-write fixture verify job-side conflict behavior, not the later assignment service or cancellation API.
 
 This endpoint evaluates anew on every invocation; Idempotency-Key is not supported as a replay contract. A lost/ambiguous commit response returns 503; a retry may add another recommendation event, while the manual transition occurs once. Recommendation audit entries document evaluations, not reservations. An audit insert failure rolls back the state, event counter and every event in that transaction.
 
@@ -107,4 +107,4 @@ curl -sS 'http://127.0.0.1:4000/api/v1/jobs?status=MANUAL_QUEUE'
 curl -sS "http://127.0.0.1:4000/api/v1/jobs/$JOB_ID/history"
 ```
 
-Expect UNAVAILABLE exclusion, manual status/reason and retained recommendation history. No assignment/reservation exists in Phase 5. The UI remains a foundation screen. Full fleet reads, response arrays and audit snapshots are intentionally unpaginated for this small operation; a large fleet needs bounded/indexed shortlists, exclusion summaries and snapshot retention planning. Queries have 5-second limits and transactions a 15-second retry budget, but the response has no explicit rider-count cap.
+Expect UNAVAILABLE exclusion, manual status/reason and retained recommendation history. The recommendation endpoint itself reserves no capacity; use the Phase 6 assignment endpoint for reservation. The UI remains a foundation screen. Full fleet reads, response arrays and audit snapshots are intentionally unpaginated for this small operation; a large fleet needs bounded/indexed shortlists, exclusion summaries and snapshot retention planning. Queries have 5-second limits and transactions a 15-second retry budget, but the response has no explicit rider-count cap.

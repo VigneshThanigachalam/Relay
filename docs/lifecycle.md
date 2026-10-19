@@ -56,3 +56,9 @@ Events are inserts only and receive per-job sequence numbers in the same transac
 The recommendation command is legal only for READY_FOR_ASSIGNMENT and MANUAL_QUEUE. It records a v1 snapshot without reserving capacity. Zero eligible riders changes READY to MANUAL with NO_ELIGIBLE_RIDER, increments state version and appends a manual-entry event in the same transaction as the recommendation event. Already-manual reevaluation preserves reason/version, even when a new candidate is found; dispatcher assignment remains explicit.
 
 Each evaluation is audited; request retries may create another snapshot. Audit insertion failure rolls back the state and every event. Per-job sequence writes serialize conflicting job changes, while rider reads remain advice without a reservation. See recommendation-api.md for the tested scoring and concurrency policies.
+
+## Phase 6 assignment behavior
+
+READY/MANUAL assignment now transitions to AWAITING_CONFIRMATION with a new PENDING attempt and both active pointers. It clears manualReason, increments version once and reserves the original job load plus one active-job slot. Successful audit includes a fresh recommendation snapshot, assignment event, optional reassignment link and optional override reason. All effects commit or roll back together.
+
+Replay checks receipt identity before lifecycle legality; it returns the original attempt/current job without another increment. Other commands against active/terminal jobs conflict and remain visible through failure events. expiresAt is captured from configuration; acceptance/rejection/expiry and release-once are not implemented by this phase. The stored deadline alone does not execute a transition.

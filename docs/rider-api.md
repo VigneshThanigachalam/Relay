@@ -1,6 +1,6 @@
 # Implemented rider API
 
-Phase 4 exposes create/list/detail/PATCH under `/api/v1/riders`. Start a real MongoDB replica set and the API using the README. Phase 5 adds the [recommendation endpoint](recommendation-api.md); assignment/reservation remains a later feature. The four existing collections are retained.
+Phase 4 exposes create/list/detail/PATCH under `/api/v1/riders`. Start a real MongoDB replica set and the API using the README. Phase 5 adds the [recommendation endpoint](recommendation-api.md); Phase 6 adds [assignment/reservation](assignment-api.md). The four existing collections are retained.
 
 ## Common conventions
 
@@ -69,7 +69,7 @@ Only supplied fields change. Empty patches, code changes, counter/free-capacity 
 - UNAVAILABLE prevents future willingness to receive work; it does not reject active attempts or release reserved capacity. Switching back to AVAILABLE also preserves workload.
 - Name/current-zone updates are permitted with active work. A known current zone may be outside the supported service zones.
 
-The service reads/checks the rider and conditionally writes configuration in one transaction. It does not write counters copied from a stale object. A concurrent rider write causes a transaction retry and a fresh recheck. Controlled real-database tests verify newly unsafe capacity/coverage edits conflict and offline edits preserve newly reserved counters. Actual reservation eligibility/capacity writes still belong to the future assignment service.
+The service reads/checks the rider and conditionally writes configuration in one transaction. It does not write counters copied from a stale object. A concurrent rider write causes a transaction retry and a fresh recheck. Controlled real-database tests verify newly unsafe capacity/coverage edits conflict and offline edits preserve newly reserved counters. Phase 6 now verifies these conflicts against actual public assignment/reservation writes as well.
 
 An uncertain PATCH commit may return 503; retry the same configuration values or read the rider. Such retries do not increment/decrement capacity counters. Concurrent changes to separate configuration fields are preserved; concurrent same-field edits use the committed order (no client-version precondition is provided).
 
@@ -111,4 +111,4 @@ curl -i "http://127.0.0.1:4000/api/v1/riders/$RIDER_ID" \
 curl 'http://127.0.0.1:4000/api/v1/riders?code=r-001'
 ```
 
-The new rider has zero workload, so reducing unused capacity to 3 succeeds. Repeat the create to observe 409 DUPLICATE_RIDER. Submit `reservedUnits` in a patch to observe 400. The active-work capacity/zone conflicts are covered by real integration fixtures and tests; they become demonstrable through normal assignment APIs in later phases. The operational React interface remains pending.
+The new rider has zero workload, so reducing unused capacity to 3 succeeds. Repeat the create to observe 409 DUPLICATE_RIDER. Submit `reservedUnits` in a patch to observe 400. The active-work capacity/zone conflicts are covered by real integration fixtures and tests; they are now demonstrable by assigning through the Phase 6 API. The operational React interface remains pending.
