@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDeliveryService } from './modules/delivery/service.js';
 import { createJobsService } from './modules/jobs/service.js';
 import { createRidersService } from './modules/riders/service.js';
 import { createRecommendationsService } from './modules/recommendations/service.js';
@@ -26,6 +27,7 @@ async function start() {
     models,
     responseThresholdMs: config.ASSIGNMENT_RESPONSE_THRESHOLD_MS,
   });
+  const delivery = createDeliveryService({ connection: mongoose.connection, models });
   const resolution = createResolutionService({ connection: mongoose.connection, models });
   const manualQueue = createManualQueueService({ connection: mongoose.connection, models });
   const scanner = createTimeoutScanner({ models, resolution });
@@ -39,6 +41,7 @@ async function start() {
     dispatch,
     resolution,
     manualQueue,
+    delivery,
   }).listen(config.PORT, () => {
     if (!stopping)
       worker = startTimeoutWorker({
