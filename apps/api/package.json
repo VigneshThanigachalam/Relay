@@ -9,7 +9,8 @@
     "start": "node --env-file-if-exists=../../.env dist/server.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "seed": "node --env-file-if-exists=../../.env --import tsx src/seed.ts"
   },
   "dependencies": {
     "express": "^5.1.0",
