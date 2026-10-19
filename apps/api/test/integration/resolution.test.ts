@@ -17,6 +17,7 @@ import {
 import { initializePersistence } from '../../src/modules/persistence/initialize.js';
 import { startTestReplicaSet } from '../helpers/mongo.js';
 import { jobFixture, riderFixture } from '../helpers/fixtures.js';
+import { createTimeoutScanner } from '../../src/modules/worker/timeout-scanner.js';
 
 let replica: MongoMemoryReplSet;
 let connection: Connection;
@@ -69,6 +70,255 @@ beforeAll(async () => {
     riders: createRidersService(deps),
     dispatch: createDispatchService({ ...deps, responseThresholdMs: 5000 }),
     resolution,
+  });
+});
+
+function barrier() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+describe('actual concurrent responses and timeout decisions', () => {
+  it.each(['accept', 'reject'] as const)(
+    'eight repeated %s requests commit one outcome and preserve counters',
+    async (action) => {
+      const { rider, attempt } = await newWork();
+      const responses = await Promise.all(
+        Array.from({ length: 8 }, () =>
+          action === 'accept' ? accept(attempt.id) : reject(attempt.id),
+        ),
+      );
+      expect(responses.every((r) => r.status === 200)).toBe(true);
+      expect(responses.filter((r) => !r.body.replayed)).toHaveLength(1);
+      expect(
+        await models.JobEvent.countDocuments({
+          type: action === 'accept' ? 'ASSIGNMENT_ACCEPTED' : 'ASSIGNMENT_REJECTED',
+        }),
+      ).toBe(1);
+      expect(await models.JobEvent.countDocuments({ type: 'MANUAL_QUEUE_ENTERED' })).toBe(
+        action === 'reject' ? 1 : 0,
+      );
+      await workload(rider.id, action === 'accept' ? 2 : 0, action === 'accept' ? 1 : 0);
+    },
+  );
+  it('eight concurrent expiry calls release once and retain one expired attempt', async () => {
+    const { rider, attempt } = await newWork();
+    now = new Date(attempt.expiresAt);
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () => resolution.expire(attempt.id)),
+    );
+    expect(results.filter((r) => r.expired)).toHaveLength(1);
+    expect(await models.JobEvent.countDocuments({ type: 'ASSIGNMENT_EXPIRED' })).toBe(1);
+    expect(await models.JobEvent.countDocuments({ type: 'MANUAL_QUEUE_ENTERED' })).toBe(1);
+    expect(await models.Assignment.countDocuments()).toBe(1);
+    await workload(rider.id, 0, 0);
+  });
+  it('opposing timely accept/reject has one winner and no mixed state', async () => {
+    const { job, rider, attempt } = await newWork();
+    const responses = await Promise.all([accept(attempt.id), reject(attempt.id)]);
+    expect(responses.filter((r) => r.status === 200)).toHaveLength(1);
+    expect(responses.filter((r) => r.status === 409)).toHaveLength(1);
+    const stored = await models.Assignment.findById(attempt.id).orFail();
+    const accepted = stored.status === 'ACCEPTED';
+    expect((await models.Job.findById(job.id).orFail()).status).toBe(
+      accepted ? 'ACCEPTED' : 'MANUAL_QUEUE',
+    );
+    expect(
+      await models.JobEvent.countDocuments({
+        type: { $in: ['ASSIGNMENT_ACCEPTED', 'ASSIGNMENT_REJECTED'] },
+      }),
+    ).toBe(1);
+    await workload(rider.id, accepted ? 2 : 0, accepted ? 1 : 0);
+  });
+  it('confirmation versus expiry at equality always yields one expiry, no acceptance and one release', async () => {
+    const { rider, attempt } = await newWork();
+    now = new Date(attempt.expiresAt);
+    const [response] = await Promise.all([accept(attempt.id), resolution.expire(attempt.id)]);
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe('ASSIGNMENT_EXPIRED');
+    expect(await models.JobEvent.countDocuments({ type: 'ASSIGNMENT_ACCEPTED' })).toBe(0);
+    expect(await models.JobEvent.countDocuments({ type: 'ASSIGNMENT_EXPIRED' })).toBe(1);
+    await workload(rider.id, 0, 0);
+  });
+  it.each(['accept', 'expire'] as const)(
+    'a pre-deadline acceptance and due expiry race preserves the winning %s decision',
+    async (winner) => {
+      const { rider, attempt } = await newWork();
+      now = new Date(attempt.expiresAt.getTime() - 1);
+      const reached = barrier();
+      const resume = barrier();
+      const expiryReached = barrier();
+      const expiryResume = barrier();
+      const original = models.Job.collection.findOneAndUpdate.bind(models.Job.collection);
+      const gate = vi
+        .spyOn(models.Job.collection, 'findOneAndUpdate')
+        .mockImplementationOnce(async (...args) => {
+          // Pause before MongoDB's first write, after the callback captured its time.
+          reached.release();
+          await resume.promise;
+          return original(...args);
+        })
+        .mockImplementationOnce(async (...args) => {
+          expiryReached.release();
+          await expiryResume.promise;
+          return original(...args);
+        });
+      const response = accept(attempt.id).then((res) => res);
+      let expiration: ReturnType<ResolutionService['expire']> | undefined;
+      try {
+        await reached.promise;
+        now = new Date(attempt.expiresAt);
+        expiration = resolution.expire(attempt.id);
+        await expiryReached.promise;
+        if (winner === 'expire') {
+          expiryResume.release();
+          expect((await expiration).expired).toBe(true);
+          resume.release();
+          expect((await response).status).toBe(409);
+        } else {
+          resume.release();
+          expect((await response).status).toBe(200);
+          expiryResume.release();
+          expect((await expiration).expired).toBe(false);
+        }
+        expect(
+          await models.JobEvent.countDocuments({
+            type: winner === 'accept' ? 'ASSIGNMENT_ACCEPTED' : 'ASSIGNMENT_EXPIRED',
+          }),
+        ).toBe(1);
+        expect(
+          await models.JobEvent.countDocuments({
+            type: winner === 'accept' ? 'ASSIGNMENT_EXPIRED' : 'ASSIGNMENT_ACCEPTED',
+          }),
+        ).toBe(0);
+        await workload(rider.id, winner === 'accept' ? 2 : 0, winner === 'accept' ? 1 : 0);
+      } finally {
+        resume.release();
+        expiryResume.release();
+        gate.mockRestore();
+        await response;
+        await expiration;
+      }
+    },
+  );
+  it('retries a pre-deadline decision with a fresh time after an unrelated job write conflicts', async () => {
+    const { job, rider, attempt } = await newWork();
+    now = new Date(attempt.expiresAt.getTime() - 1);
+    const reached = barrier();
+    const resume = barrier();
+    const original = models.Job.collection.findOneAndUpdate.bind(models.Job.collection);
+    const gate = vi
+      .spyOn(models.Job.collection, 'findOneAndUpdate')
+      .mockImplementationOnce(async (...args) => {
+        reached.release();
+        await resume.promise;
+        return original(...args);
+      });
+    const response = accept(attempt.id).then((res) => res);
+    try {
+      await reached.promise;
+      // Controlled unrelated write forces a real transaction retry. It does not
+      // implement a new business action or manufacture a confirmation event.
+      await models.Job.updateOne({ _id: job._id }, { $set: { updatedAt: now } });
+      now = new Date(attempt.expiresAt);
+      resume.release();
+      expect((await response).status).toBe(409);
+      expect((await models.Assignment.findById(attempt.id).orFail()).status).toBe('EXPIRED');
+      await workload(rider.id, 0, 0);
+    } finally {
+      resume.release();
+      gate.mockRestore();
+      await response;
+    }
+  });
+});
+
+describe('persisted deadline scans and restart recovery', () => {
+  const scanner = (batchSize = 100, onAttemptError = (_id: string) => {}) =>
+    createTimeoutScanner({
+      models,
+      resolution,
+      clock: { now: () => new Date(now) },
+      batchSize,
+      onAttemptError,
+    });
+  it('finds work created by an earlier service instance and expires it after simulated downtime', async () => {
+    const { rider, attempt } = await newWork();
+    now = new Date(attempt.expiresAt.getTime() + 3600_000);
+    const restartedResolution = createResolutionService({
+      connection,
+      models,
+      clock: { now: () => new Date(now) },
+    });
+    const restartedScanner = createTimeoutScanner({
+      models,
+      resolution: restartedResolution,
+      clock: { now: () => new Date(now) },
+    });
+    expect(await restartedScanner.scan()).toEqual({ examined: 1, expired: 1, failed: 0 });
+    expect(await restartedScanner.scan()).toEqual({ examined: 0, expired: 0, failed: 0 });
+    await workload(rider.id, 0, 0);
+  });
+  it('bounds each ordered batch, leaves future work alone and drains later scans', async () => {
+    const first = await newWork();
+    now = new Date(now.getTime() + 1000);
+    const second = await newWork();
+    now = new Date(now.getTime() + 1000);
+    const third = await newWork();
+    now = new Date(second.attempt.expiresAt);
+    const scan = scanner(1);
+    expect(await scan.scan()).toEqual({ examined: 1, expired: 1, failed: 0 });
+    expect((await models.Assignment.findById(first.attempt.id).orFail()).status).toBe('EXPIRED');
+    expect((await models.Assignment.findById(second.attempt.id).orFail()).status).toBe('PENDING');
+    expect(await scan.scan()).toEqual({ examined: 1, expired: 1, failed: 0 });
+    expect(await scan.scan()).toEqual({ examined: 0, expired: 0, failed: 0 });
+    expect((await models.Assignment.findById(third.attempt.id).orFail()).status).toBe('PENDING');
+  });
+  it('continues after one failed attempt and retries it on a later scan', async () => {
+    const first = await newWork();
+    const second = await newWork();
+    now = new Date(second.attempt.expiresAt);
+    const original = models.JobEvent.collection.insertOne.bind(models.JobEvent.collection);
+    vi.spyOn(models.JobEvent.collection, 'insertOne')
+      .mockRejectedValueOnce(new Error('temporary audit error'))
+      .mockImplementation((...args) => original(...args));
+    const onAttemptError = vi.fn();
+    const scan = scanner(100, onAttemptError);
+    expect(await scan.scan()).toEqual({ examined: 2, expired: 1, failed: 1 });
+    expect(onAttemptError).toHaveBeenCalledTimes(1);
+    expect(await scan.scan()).toEqual({ examined: 1, expired: 1, failed: 0 });
+    await workload(first.rider.id, 0, 0);
+    await workload(second.rider.id, 0, 0);
+  });
+  it('allows duplicate scanner instances without duplicate expiry/release events', async () => {
+    const { rider, attempt } = await newWork();
+    now = new Date(attempt.expiresAt);
+    const results = await Promise.all([scanner().scan(), scanner().scan()]);
+    expect(results.reduce((sum, r) => sum + r.expired, 0)).toBe(1);
+    expect(results.every((r) => r.failed === 0)).toBe(true);
+    expect(await models.JobEvent.countDocuments({ type: 'ASSIGNMENT_EXPIRED' })).toBe(1);
+    await workload(rider.id, 0, 0);
+  });
+  it('ignores accepted work and obeys a stop signal before starting another transaction', async () => {
+    const first = await newWork();
+    const second = await newWork(first.rider.id);
+    await accept(first.attempt.id);
+    now = new Date(second.attempt.expiresAt);
+    expect(await scanner().scan(() => true)).toEqual({ examined: 0, expired: 0, failed: 0 });
+    expect(await scanner().scan()).toEqual({ examined: 1, expired: 1, failed: 0 });
+    expect((await models.Assignment.findById(first.attempt.id).orFail()).status).toBe('ACCEPTED');
+    await workload(first.rider.id, 2, 1);
+  });
+  it('propagates shortlist query failure so the worker can report and retry', async () => {
+    vi.spyOn(models.Assignment.collection, 'find').mockImplementationOnce(() => {
+      throw new Error('shortlist query unavailable');
+    });
+    await expect(scanner().scan()).rejects.toThrow('shortlist query unavailable');
+  });
+  it.each([0, 101, 1.5])('rejects invalid batch size %s', (batchSize) => {
+    expect(() => scanner(batchSize)).toThrow(RangeError);
   });
 });
 beforeEach(async () => {
