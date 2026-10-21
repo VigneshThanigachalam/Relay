@@ -108,3 +108,10 @@ it('keeps a refresh error visible until a later retry actually succeeds', async 
   expect(result.current.error).toBeUndefined();
   expect(result.current.data?.value).toBe(2);
 });
+
+it('does not fetch an inactive queue while on Overview', () => {
+  const { result } = renderHook(() => useResource(null, 3));
+  expect(result.current.loading).toBe(false);
+  expect(result.current.settledRevision).toBe(3);
+  expect(fetchMock).not.toHaveBeenCalled();
+});
