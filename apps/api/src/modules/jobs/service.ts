@@ -1,3 +1,4 @@
+import { literalContains } from '../../http/search.js';
 import {
   Types,
   type ClientSession,
@@ -143,6 +144,7 @@ export function createJobsService({ connection, models, clock = systemClock }: D
   async function list(input: ListJobsInput) {
     const filter: FilterQuery<JobRecord> = {};
     if (input.orderReference) filter.orderReference = input.orderReference;
+    if (input.search) filter.$and = [{ orderReference: literalContains(input.search) }];
     if (input.status) filter.status = input.status;
     if (input.zone) filter.$or = [{ pickupZone: input.zone }, { deliveryZone: input.zone }];
     return runInTransaction(connection, async (session) => {

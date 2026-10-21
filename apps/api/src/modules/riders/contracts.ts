@@ -43,6 +43,7 @@ export const updateRiderSchema = z
 export const listRidersSchema = paginationSchema
   .extend({
     code: code.optional(),
+    search: z.string().trim().min(1).max(100).optional(),
     availability: availability.optional(),
     zone: serviceZoneSchema.optional(),
   })

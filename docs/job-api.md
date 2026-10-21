@@ -39,7 +39,7 @@ A once-valid deadline may be past by replay time: an identical stored request st
 
 `GET /api/v1/jobs?page=1&pageSize=20&status=NEW&zone=NORTH&orderReference=RELAY-1001`
 
-All filters optional. Reference is an exact normalized match, never a regex or substring. Zone matches pickup **or** delivery, combined with status/reference using AND. Status must be one of the eight documented job states. Page is 1–10000; pageSize 1–100, default 20. Repeated/unknown query keys, invalid numbers and operator-shaped filters are rejected. Sort is `createdAt` then `_id` ascending, providing a deterministic tie break.
+All filters optional. `orderReference` remains an exact normalized match. Optional `search` (trimmed, 1–80 characters) performs case-insensitive literal substring matching on order reference. Regex metacharacters are escaped; `.*` searches for those two characters. Exact and partial filters combine with AND. Zone matches pickup **or** delivery, combined with status/reference using AND. Status must be one of the eight documented job states. Page is 1–10000; pageSize 1–100, default 20. Repeated/unknown query keys, invalid numbers and operator-shaped filters are rejected. Sort is `createdAt` then `_id` ascending, providing a deterministic tie break.
 
 200 response: `{data:[job],pagination:{page:1,pageSize:20,total:1}}`. Empty/beyond-last pages return an empty array while retaining the total. Results and total use one snapshot; separate page requests can observe intervening changes.
 

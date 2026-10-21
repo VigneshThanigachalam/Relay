@@ -31,6 +31,7 @@ export type CreateJobInput = z.infer<typeof createJobSchema>;
 export const listJobsSchema = paginationSchema
   .extend({
     orderReference: reference.optional(),
+    search: z.string().trim().min(1).max(80).optional(),
     status: z.enum(JOB_STATUSES).optional(),
     zone: serviceZoneSchema.optional(),
   })
