@@ -11,3 +11,9 @@ The GitHub connection has repository write access, but the terminal has no crede
 Before publication, all application and test files are compared with the fully verified local state. The requested tree is built on the existing remote tree and compared with the prepared local tree SHA; main is checked again after merging. Production code has not changed since the 577-test check. Documentation and public-source exclusions receive a separate formatting/diff review. No credentials, real .env, node_modules or generated build output are published.
 
 A later authenticated local git push can transfer the original feature refs without recreating historical commits. Fetch the current remote first and merge its publication changes; never force-push over existing work. The presentation is docs/solution-one-page.pdf, unchanged from the verified one-page handoff.
+
+## Routed search follow-up
+
+This update starts from remote main 1a31c15192d6a3a500a9856823d0eb586c6ef6cd (tree d8409f6acbc5b7cd3744c2f2869cc7136182f6e0). Local feature `feat/search-navigation-polish` contains real incremental commits: c20b566 (server search), 31f6c9a (routed interface), followed by checked link/filter refinements and documentation. The full check now passes 590 tests; see verification.md for eleven real-browser checks and the final CSS/build review.
+
+Publication creates new incremental GitHub commits for these completed stages, preserving the prior main as their ancestor. Each message references its original local commit; no author dates, original commit IDs or CI results are recreated. The final remote tree must match the prepared local tree before merging. The original earlier ZIP is a historical handoff and does not contain this follow-up; GitHub main is the updated source for this change.

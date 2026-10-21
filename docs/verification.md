@@ -76,3 +76,25 @@ The desktop workflow recorded **one main-frame navigation** (initial load only) 
 Verification corrections are recorded honestly: an extraction refactor omitted a helper import, which TypeScript caught and was fixed; the first keyboard run exposed missing opener restoration after React unmount, now fixed with an RTL regression and real browser confirmation. Early browser harness runs needed exact/scoped selectors and the actual MANUAL_OVERRIDE event name. A late screenshot capture timed out, and an offscreen mobile click in the combined run timed out. A separate foreground mobile run explicitly scrolled to the order and passed; the failed combined run is not reported as an overall pass. Automated checks and completed desktop assertions remain independently recorded above.
 
 The Windows local seed failure reported in the conversation remains unverified because its underlying diagnostic was not supplied. This package includes the earlier stage-specific logging fix and clearer root-folder/Node/replica-set instructions; no claim is made that a separate Windows installation was repaired.
+
+## Routed navigation and search follow-up — 21 October 2026
+
+`npm run check` passed: Prettier, both TypeScript checks, **555 API + 35 web = 590 automated tests**, and both production builds. Four additional API integration cases exercise partial/case-insensitive literal search, filter combinations, exact-filter compatibility, validation and escaped regex characters against MongoDB 8.0.17. Web tests cover all direct routes and unknown-route recovery, URL sanitization/history/remount, debounce/pagination/clear, distinct Overview content, disabled queue reads and one-second refresh feedback. Existing assignment, timeout, idempotency and lifecycle suites continue to pass.
+
+The final browser run passed **11 checks**, using real seeded MongoDB replica-set data, Express and Vite, with no page errors:
+
+1. Root redirects to a distinct Overview with real summary panels and no delivery table.
+2. Rapid partial/case-insensitive typing issues one debounced API search and returns the expected actual row.
+3. Search/status combine correctly; both and the delivery route survive a full reload.
+4. Rider name search matches real data, in addition to supported code search.
+5. Back/Forward restore page and filters; the manual-queue deep link reloads.
+6. A 1.6-second delayed response preserves the same fully opaque row DOM; pending feedback lasts until the real response.
+7. A fast real read still shows at least one second of manual-refresh progress.
+8. An injected 503 keeps successful rows, reports failure and recovers through Retry read.
+9. The linked SVG favicon is served successfully with its image content type.
+10. Unknown URLs provide a working recovery link.
+11. At 390px, mobile links work, reload preserves Deliveries and the document has no horizontal overflow (the table scrolls internally).
+
+Overview and mobile screenshots were visually inspected. This caught inherited button-only flex styling after converting navigation to links; explicit link layout and a styled Overview filter corrected it. The final web build and all eleven browser checks were rerun after that CSS correction. Filter selectors also received explicit accessible names. Earlier harness attempts encountered Chromium archive ownership restrictions and a selector that omitted the manual count badge; those attempts are not recorded as successful runs. Chromium was extracted without changing file ownership, and the corrected harness completed.
+
+`npm audit --omit=dev` reports zero production vulnerabilities with React Router 7.18.4. An older trial version was upgraded after the audit flagged it; it is not in the submitted lockfile. Temporary Playwright/Chromium tools remain outside the application dependencies. Browser checks were run in this Linux environment; no claim is made about execution on the reviewer's Windows machine.

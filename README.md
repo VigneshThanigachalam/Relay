@@ -2,6 +2,8 @@
 
 A working autonomous dispatch desk built with React, TypeScript, Vite, Express, MongoDB/Mongoose and Zod. Dispatchers create jobs, inspect explainable rider scores, reserve capacity, simulate rider responses, investigate exceptions and complete deliveries. An in-process worker expires unanswered assignments automatically. All eleven development phases are implemented; [verification](docs/verification.md) separates tested behavior from environment limitations.
 
+The interface has real React Router pages: `/overview`, `/deliveries`, `/manual-queue` and `/riders`. The root redirects to Overview; unknown URLs offer a recovery link. Page, search, zone, status and pagination live in the URL, so reload and Back/Forward restore the view.
+
 The refined interface keeps queue rows visible during background refresh, preserves unsaved rider edits, and shows action-specific progress plus success/error notifications. Details open in a keyboard-accessible side panel. See [interface decisions and requirement review](docs/ui-review.md).
 
 ## Run locally
@@ -59,7 +61,7 @@ The API verifies replica-set/session support, a writable primary, declared index
 
 ## Reviewer demonstration
 
-1. Start from seeded data. Inspect count cards and attention jobs. Search exact order reference, filter status/zone, then clear filters.
+1. Start from seeded data. Inspect count cards and attention jobs. Open Deliveries, search a partial order reference, filter status/zone, then clear filters. Overview contains status totals, exception shortcuts and a fleet snapshot; Deliveries contains the full operational queue.
 2. **New job**: create `REVIEW-001` with CENTRAL → NORTH, load 2 and NORMAL priority. Submit the same details again to see reference replay, then open the one job and **Mark ready**.
 3. **Review recommendations**: inspect travel/workload/deadline components and excluded riders. Unavailable Lena, wrong-coverage Noah and occupied Isha cannot take this job. Select a different eligible rider and enter an operational reason to demonstrate an override; **Assign selected rider**.
 4. **Accept assignment** simulates the selected rider. **Record pickup**, then **Complete delivery**. Open Riders to verify released capacity, and inspect the job's events and stored attempt snapshot. A network/503 assignment failure offers **Retry exact assignment**, retaining the command key and payload.
@@ -67,7 +69,7 @@ The API verifies replica-set/session support, a writable primary, declared index
 6. Investigate automatically expired `DEMO-OVERDUE` in Manual queue. Its expired attempt, release timestamp and system actor explain startup recovery. Reassign it with the same UI workflow. For a fresh timed demonstration use the short-threshold configuration above.
 7. Open `DEMO-NO-CANDIDATE` to inspect exclusions and no-candidate handling. Cancel `DEMO-NEW` with a reason. View/edit rider availability/capacity/coverage and active workload. Occupied capacity and active coverage cannot be removed.
 
-No manual database edits are needed. Exact normalized reference/code search is intentional. A zone filter matches job pickup OR destination; rider zone filtering matches coverage. Awaiting assignment counts NEW + READY; in progress counts ACCEPTED + PICKED_UP; manual is separate. Dates display in the operator's locale. Recommendations are audited commands, so only GETs poll automatically.
+No manual database edits are needed. Search is case-insensitive and partial: order reference for deliveries, name or code for riders. Typing waits 350 ms before requesting; Search submits immediately. Exact normalized reference/code filters remain available in the API. A zone filter matches job pickup OR destination; rider zone filtering matches coverage. Awaiting assignment counts NEW + READY; in progress counts ACCEPTED + PICKED_UP; manual is separate. Dates display in the operator's locale. Recommendations are audited commands, so only GETs poll automatically.
 
 ## Verify and build
 
@@ -99,3 +101,11 @@ Production API code is in `apps/api/dist`; frontend assets are in `apps/web/dist
 This is a modular monolith: thin HTTP controllers, transaction-owning services, pure ranking/lifecycle functions and four workflow collections. Shared helpers cover audit allocation and capacity release. Comments explain non-obvious predicates, retries and boundaries. Native fetch/React state keep the small UI understandable. Additional dependencies beyond the requested stack serve development and verification: tsx, Vite's React plugin, jsdom, type packages, Prettier and mongodb-memory-server-core (which launches real mongod).
 
 The handoff ZIP includes `.git` and all retained feature branches. Extract hidden files too, then run `git log --all --graph --oneline`. Commits use the transparent local identity **Codex Implementation Agent <codex@local.invalid>**. The public repository is [VigneshThanigachalam/Relay](https://github.com/VigneshThanigachalam/Relay). Publishing through the GitHub connection creates new publication commits on the existing remote history; the exact local feature commits remain in the handoff ZIP. See [publication notes](docs/github-publication.md). Configure your own author for future local commits. No deployment is supplied.
+
+## Updating and hosting the interface
+
+After pulling this update, run `npm ci` from the repository root before restarting `npm run dev:api` and `npm run dev:web`: React Router 7.18.4 is a new production dependency, justified by real page routing and browser history support. The application still uses the existing resource hooks and Express API rather than adding another data layer.
+
+Manual Refresh keeps its progress indicator visible for at least one second, and longer if real reads are still pending. Successful rows remain mounted at full opacity; completion reports success or a read error. The SVG favicon is served from the web public directory.
+
+Vite development/preview supports direct route requests. A production frontend host must fall back to `index.html` for frontend page URLs (for example `/deliveries`) while preserving static assets and `/api` routing. Express remains the API server; deployment configuration is not supplied.
