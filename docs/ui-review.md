@@ -31,3 +31,11 @@ Polling remains five seconds, and real timeout visibility includes worker and po
 The user's Windows MongoDB replica set was confirmed writable in the conversation, but the subsequent local seed failure was not diagnosed from its underlying error. This revision includes the earlier stage-specific seed diagnostics and clearer PowerShell/root-folder instructions. Successful tests against disposable real MongoDB do not claim to have repaired that separate local environment.
 
 See [verification.md](verification.md) for exact automated and browser results. Older phase reports/screenshots describe the version at that point in history; the README no longer presents the earlier capture as the current interface.
+
+## Search and page navigation follow-up
+
+The follow-up addresses the reported duplicate screens, ineffective search, blinking refresh, missing favicon and lost page after reload. Overview now contains summary-only status/fleet panels; Deliveries remains the complete working queue. React Router provides four real paths with active navigation links and unknown-page recovery. URL query filters survive reload and browser history. The shared desk component composes the pages without adding duplicate business state.
+
+Search debounces for 350 ms and sends the server a validated literal substring filter; rider search includes name and code. Existing exact API filters keep their semantics. Pagination resets when filters change. Manual refresh retains mounted, fully opaque rows, shows at least one second of progress, and waits longer for real responses. Failures retain successful rows and offer retry. No generated data or artificial response is introduced.
+
+The production dependency addition is React Router 7.18.4. A registry download for an earlier install attempt was denied; the final supported installation succeeded and the production dependency audit reports zero vulnerabilities. Temporary browser tools are outside the project dependency tree.

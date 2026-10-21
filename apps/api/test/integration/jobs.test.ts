@@ -524,3 +524,41 @@ describe('bounded chronological job history', () => {
     expect(await models.JobEvent.countDocuments()).toBe(1);
   });
 });
+
+describe('literal job search', () => {
+  it('combines partial case-insensitive reference search with status and either route zone', async () => {
+    const north = await create(payload({ orderReference: 'ORDER-101' }));
+    const south = await create(payload({ orderReference: 'ORDER-102', deliveryZone: 'SOUTH' }));
+    await create(payload({ orderReference: 'OTHER-101' }));
+    for (const id of [north.body.data.id, south.body.data.id])
+      await request(app)
+        .post(`/api/v1/jobs/${id}/ready`)
+        .set('X-Actor-Id', 'dispatcher:test')
+        .send({});
+    const res = await request(app)
+      .get('/api/v1/jobs')
+      .query({ search: ' order-10 ', status: 'READY_FOR_ASSIGNMENT', zone: 'NORTH' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.map((j: { orderReference: string }) => j.orderReference)).toEqual([
+      'ORDER-101',
+    ]);
+    expect(res.body.pagination.total).toBe(1);
+    const exact = await request(app).get('/api/v1/jobs').query({ orderReference: 'ORDER-10' });
+    expect(exact.body.data).toEqual([]);
+    const intersection = await request(app)
+      .get('/api/v1/jobs')
+      .query({ orderReference: 'ORDER-101', search: '102' });
+    expect(intersection.body.data).toEqual([]);
+  });
+  it('escapes regex characters and rejects empty or oversized search', async () => {
+    await create(payload({ orderReference: 'LITERAL.*-01' }));
+    await create(payload({ orderReference: 'OTHER-01' }));
+    const res = await request(app).get('/api/v1/jobs').query({ search: '.*' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.map((j: { orderReference: string }) => j.orderReference)).toEqual([
+      'LITERAL.*-01',
+    ]);
+    for (const search of [' ', 'x'.repeat(81)])
+      expect((await request(app).get('/api/v1/jobs').query({ search })).status).toBe(400);
+  });
+});

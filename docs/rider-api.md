@@ -34,7 +34,7 @@ The server initializes reservedUnits/activeJobCount to zero and captures actor/t
 
 `GET /api/v1/riders?code=R-001&zone=NORTH&availability=AVAILABLE&page=1&pageSize=20`
 
-Filters are optional and combine with AND. Code is exact/normalized and is not a regex. Zone matches supported service zones, not current location. Availability must be a known enum. Results sort by code then ID ascending. Page is 1–10000; pageSize 1–100 (default 20). An empty/beyond-last page returns an empty array with its total.
+Filters are optional and combine with AND. `code` remains exact/normalized. Optional `search` (trimmed, 1–100 characters) matches a case-insensitive literal substring of rider name OR code; this group combines with code/availability/zone using AND. Regex metacharacters are escaped. Zone matches supported service zones, not current location. Availability must be a known enum. Results sort by code then ID ascending. Page is 1–10000; pageSize 1–100 (default 20). An empty/beyond-last page returns an empty array with its total.
 
 200: `{data:[rider],pagination:{page:1,pageSize:20,total:1}}`. Rows and total use one snapshot. Between requests, the fleet can change.
 

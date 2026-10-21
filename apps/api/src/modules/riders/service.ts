@@ -1,3 +1,4 @@
+import { literalContains } from '../../http/search.js';
 import { Types, type Connection, type FilterQuery } from 'mongoose';
 import { ApiError } from '../../http/api-error.js';
 import type { Pagination } from '../../http/contracts.js';
@@ -37,6 +38,11 @@ export function createRidersService({ connection, models, clock = systemClock }:
   async function list(input: ListRidersInput) {
     const filter: FilterQuery<RiderRecord> = {};
     if (input.code) filter.code = input.code;
+    if (input.search)
+      filter.$or = [
+        { code: literalContains(input.search) },
+        { name: literalContains(input.search) },
+      ];
     if (input.availability) filter.availability = input.availability;
     if (input.zone) filter.serviceZones = input.zone;
     return runInTransaction(connection, async (session) => {

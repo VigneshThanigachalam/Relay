@@ -523,3 +523,37 @@ it('preserves newly reserved counters when going offline races a counter write',
     await pending;
   }
 });
+
+describe('literal rider search', () => {
+  it('searches partial name or code while combining availability and coverage', async () => {
+    await create(payload({ code: 'NORTH-01', name: 'Ananya Rao' }));
+    await create(payload({ code: 'NORTH-02', name: 'Ananya Kumar', availability: 'UNAVAILABLE' }));
+    await create(
+      payload({
+        code: 'SOUTH-01',
+        name: 'Ananya Shah',
+        serviceZones: ['SOUTH'],
+        currentZone: 'SOUTH',
+      }),
+    );
+    const res = await request(app)
+      .get('/api/v1/riders')
+      .query({ search: ' ananYA ', availability: 'AVAILABLE', zone: 'NORTH' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.map((r: { code: string }) => r.code)).toEqual(['NORTH-01']);
+    expect(res.body.pagination.total).toBe(1);
+    const code = await request(app).get('/api/v1/riders').query({ search: 'north-0' });
+    expect(code.body.pagination.total).toBe(2);
+    const exact = await request(app).get('/api/v1/riders').query({ code: 'NORTH-0' });
+    expect(exact.body.data).toEqual([]);
+  });
+  it('treats regex text literally and bounds search input', async () => {
+    await create(payload({ code: 'R-LITERAL', name: 'A.* Rider' }));
+    await create(payload({ code: 'R-OTHER' }));
+    const res = await request(app).get('/api/v1/riders').query({ search: '.*' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.map((r: { code: string }) => r.code)).toEqual(['R-LITERAL']);
+    for (const search of [' ', 'x'.repeat(101)])
+      expect((await request(app).get('/api/v1/riders').query({ search })).status).toBe(400);
+  });
+});

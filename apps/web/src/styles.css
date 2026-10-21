@@ -232,6 +232,9 @@ button svg {
   gap: 6px;
 }
 .nav-item {
+  display: flex;
+  align-items: center;
+  line-height: 1.4;
   justify-content: flex-start;
   gap: 12px;
   border: 0;
@@ -248,10 +251,10 @@ button svg {
   color: #4b5dd0;
   font-weight: 650;
 }
-.nav-item:hover:enabled {
+.nav-item:hover {
   background: #f5f7fc;
 }
-.nav-item.active:hover:enabled {
+.nav-item.active:hover {
   background: #e8edff;
 }
 .nav-item b {
@@ -834,11 +837,11 @@ p {
   background: transparent;
   white-space: nowrap;
 }
-.queue-chips button[aria-pressed='true'] {
+.queue-chips button[aria-current='page'] {
   color: #5668cd;
   font-weight: 650;
 }
-.queue-chips button[aria-pressed='true']:after {
+.queue-chips button[aria-current='page']:after {
   content: '';
   position: absolute;
   bottom: 0;
@@ -1290,10 +1293,10 @@ footer .status-dot {
   font-size: 13px;
   position: relative;
 }
-.detail-tabs button[aria-pressed='true'] {
+.detail-tabs button[aria-current='page'] {
   color: #576bcf;
 }
-.detail-tabs button[aria-pressed='true']:after {
+.detail-tabs button[aria-current='page']:after {
   content: '';
   position: absolute;
   left: 0;
@@ -2739,7 +2742,9 @@ fieldset {
     padding: 8px 7px;
     gap: 4px;
   }
-  .mobile-nav button {
+  .mobile-nav a {
+    display: flex;
+    align-items: center;
     flex: 1;
     flex-direction: column;
     gap: 4px;
@@ -2749,7 +2754,7 @@ fieldset {
     border: 0;
     background: transparent;
   }
-  .mobile-nav button[aria-pressed='true'] {
+  .mobile-nav a[aria-current='page'] {
     color: #64748b;
     background: #f2f5ff;
     border-radius: 7px;
@@ -3181,4 +3186,160 @@ fieldset {
 }
 .recommendations {
   scroll-margin-top: 85px;
+}
+
+/* Overview summarizes the operation; detailed records live in their own queues. */
+.overview-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 18px;
+}
+.overview-controls p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.overview-controls label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  color: #64748b;
+}
+.overview-controls select {
+  width: 145px;
+  padding: 8px 10px;
+}
+.overview-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 20px;
+}
+.overview-card {
+  padding: 24px;
+}
+.overview-card-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.overview-card-heading h2 {
+  font-size: 17px;
+  margin: 8px 0 16px;
+}
+.status-breakdown {
+  display: grid;
+  gap: 4px;
+}
+.status-breakdown button {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) 1fr 30px 14px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 0;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  font-size: 12px;
+  color: #52617a;
+}
+.status-breakdown button:hover {
+  background: #f7f8fe;
+}
+.status-breakdown strong {
+  text-align: right;
+  color: #25364b;
+}
+.status-track {
+  height: 6px;
+  border-radius: 8px;
+  background: #f0f2f8;
+  overflow: hidden;
+}
+.status-track i {
+  display: block;
+  height: 100%;
+  border-radius: 8px;
+  background: #6269dc;
+  transition: width 0.2s ease;
+}
+.fleet-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+  margin: 24px 0;
+}
+.fleet-summary dt {
+  font-size: 12px;
+  color: #64748b;
+}
+.fleet-summary dd {
+  margin: 9px 0 0;
+  font-weight: 700;
+  font-size: 28px;
+  color: #26394f;
+}
+.overview-footnote {
+  margin: 0;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.7;
+}
+/* Revalidation never fades a retained table; its update label communicates staleness. */
+.table-scroll,
+.table-scroll.stale {
+  opacity: 1;
+  transition: none;
+}
+@media (max-width: 1000px) {
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 650px) {
+  .overview-controls {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .overview-card {
+    padding: 18px;
+  }
+  .overview-card-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    margin-bottom: 12px;
+  }
+  .status-breakdown button {
+    grid-template-columns: minmax(115px, 1fr) 1fr 22px 12px;
+    gap: 7px;
+  }
+}
+
+.nav-item,
+.mobile-nav a {
+  text-decoration: none;
+}
+.not-found {
+  padding: 3rem;
+}
+
+.overview-controls select {
+  font: inherit;
+  min-height: 36px;
+  padding: 7px 30px 7px 12px;
+  color: var(--ink);
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.nav-item svg,
+.mobile-nav a svg {
+  flex-shrink: 0;
 }

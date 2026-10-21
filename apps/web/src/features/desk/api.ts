@@ -55,7 +55,7 @@ export const message = (error: unknown) =>
 
 type ResourceState<T> = {
   scope: string;
-  dataPath: string;
+  dataPath: string | null;
   data?: T;
   error?: string | undefined;
   fetching: boolean;
@@ -64,7 +64,7 @@ type ResourceState<T> = {
 };
 // Retain a successful snapshot during revalidation. Changing scope (e.g. jobs
 // to riders) clears it; filters within an explicitly shared scope keep context.
-export function useResource<T>(path: string, revision = 0, scope = path) {
+export function useResource<T>(path: string | null, revision = 0, scope = path ?? 'disabled') {
   const [state, setState] = useState<ResourceState<T>>({
     scope,
     dataPath: path,
@@ -75,6 +75,7 @@ export function useResource<T>(path: string, revision = 0, scope = path) {
   const [retry, setRetry] = useState(0);
   const writeEpoch = useRef(0);
   useEffect(() => {
+    if (!path) return;
     const controller = new AbortController();
     let fetching = false;
     const read = async () => {
@@ -135,16 +136,17 @@ export function useResource<T>(path: string, revision = 0, scope = path) {
     },
     [scope, path, revision],
   );
-  const same = state.scope === scope;
+  const enabled = path !== null;
+  const same = enabled && state.scope === scope;
   const data = same ? state.data : undefined;
   return {
     data,
     error: same ? state.error : undefined,
-    loading: !data && (!same || state.fetching),
+    loading: enabled && !data && (!same || state.fetching),
     refreshing: !!data && state.fetching,
     stale: !!data && state.dataPath !== path,
     updatedAt: same ? state.updatedAt : null,
-    settledRevision: same ? state.settledRevision : -1,
+    settledRevision: !enabled ? revision : same ? state.settledRevision : -1,
     reload,
     replace,
   };

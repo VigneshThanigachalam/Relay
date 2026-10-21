@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { RiderDetail } from './features/desk/RiderDetail';
@@ -66,6 +66,7 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
 beforeEach(() => {
+  window.history.replaceState(null, '', '/deliveries');
   localStorage.clear();
   fetchMock = vi.fn<typeof fetch>(async (input, options) => {
     const url = String(input);
@@ -129,7 +130,7 @@ function detail(value: Job = job) {
 describe('operational desk', () => {
   it('loads actual counts and opens a job without triggering recommendations on reads', async () => {
     render(<App />);
-    expect(screen.getByText('Loading workload…')).toBeVisible();
+    expect(screen.getByText('Loading deliveries…')).toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button', { name: 'DEMO-001' }));
     expect(await screen.findByRole('complementary', { name: 'Job details' })).toBeVisible();
     expect(await screen.findByRole('button', { name: 'Review recommendations' })).toBeEnabled();
@@ -137,7 +138,7 @@ describe('operational desk', () => {
       fetchMock.mock.calls.every(([, options]) => !options?.method || options.method === 'GET'),
     ).toBe(true);
   });
-  it('sends exact reference, status and zone filters', async () => {
+  it('combines partial reference search with status and zone filters', async () => {
     render(<App />);
     await screen.findByRole('button', { name: 'DEMO-001' });
     fireEvent.change(screen.getByLabelText('Order reference'), { target: { value: 'DEMO-001' } });
@@ -148,7 +149,7 @@ describe('operational desk', () => {
       expect(
         fetchMock.mock.calls.some(
           ([url]) =>
-            String(url).includes('orderReference=DEMO-001') &&
+            String(url).includes('search=DEMO-001') &&
             String(url).includes('status=DELIVERED') &&
             String(url).includes('zone=WEST'),
         ),
@@ -205,7 +206,7 @@ describe('operational desk', () => {
   });
   it('shows rider workload and opens protected rider configuration', async () => {
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: /^Riders$/i }));
+    fireEvent.click(screen.getByRole('link', { name: /^Riders$/i }));
     expect(await screen.findByText('8 / 10 free units')).toBeVisible();
     expect(screen.getByText('2 reserved · 1 active')).toBeVisible();
   });
@@ -356,7 +357,7 @@ describe('interaction continuity', () => {
     expect(screen.getByRole('button', { name: 'Refreshing…' })).toBeDisabled();
     expect(screen.queryByText('Loading deliveries…')).not.toBeInTheDocument();
     resolve(json({ data: [job], pagination: { page: 1, pageSize: 20, total: 1 } }));
-    expect(await screen.findByText('Workspace is up to date')).toBeVisible();
+    expect(await screen.findByText('Workspace is up to date', {}, { timeout: 2500 })).toBeVisible();
     expect(screen.getByRole('button', { name: 'DEMO-001' })).toBe(originalButton);
   });
   it('preserves a rider edit and its input DOM while refreshing workload', async () => {
@@ -424,5 +425,124 @@ describe('interaction continuity', () => {
     );
     expect(await screen.findByRole('button', { name: 'Record pickup' })).toBeVisible();
     expect(screen.getByText('Assignment accepted')).toBeVisible();
+  });
+});
+
+describe('navigation and search experience', () => {
+  it('opens every page directly and renders a recovery link for unknown routes', async () => {
+    for (const [path, heading] of [
+      ['/overview', 'Your dispatch day, in focus.'],
+      ['/deliveries', 'All deliveries, ready to move.'],
+      ['/manual-queue', 'Make the next move.'],
+      ['/riders', 'Your fleet, in focus.'],
+    ]) {
+      window.history.replaceState(null, '', path!);
+      const page = render(<App />);
+      expect(await screen.findByRole('heading', { name: heading! })).toBeVisible();
+      expect(window.location.pathname).toBe(path);
+      page.unmount();
+    }
+    window.history.replaceState(null, '', '/missing');
+    render(<App />);
+    expect(screen.getByRole('heading', { name: 'Page not found' })).toBeVisible();
+    fireEvent.click(screen.getByRole('link', { name: 'Return to overview' }));
+    expect(
+      await screen.findByRole('heading', { name: 'Your dispatch day, in focus.' }),
+    ).toBeVisible();
+    expect(window.location.pathname).toBe('/overview');
+  });
+
+  it('shows a real summary on Overview and the full operational queue only on Deliveries', async () => {
+    window.history.replaceState(null, '', '/');
+    render(<App />);
+    expect(await screen.findByRole('region', { name: 'Delivery status breakdown' })).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Fleet snapshot' })).toBeVisible();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/jobs?'))).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Show ready for assignment deliveries' }));
+    expect(await screen.findByRole('table')).toBeVisible();
+    expect(screen.queryByRole('region', { name: 'Workload overview' })).not.toBeInTheDocument();
+    expect(new URL(window.location.href).searchParams.get('status')).toBe('READY_FOR_ASSIGNMENT');
+  });
+  it('debounces typing, resets pagination, and clears an applied search immediately', async () => {
+    vi.useFakeTimers();
+    let unmount = () => {};
+    try {
+      window.history.replaceState(null, '', '/deliveries?page=3');
+      ({ unmount } = render(<App />));
+      await act(async () => {});
+      const before = fetchMock.mock.calls.length;
+      const input = screen.getByLabelText('Order reference');
+      fireEvent.change(input, { target: { value: 'D' } });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      fireEvent.change(input, { target: { value: 'DEMO' } });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(349);
+      });
+      expect(fetchMock.mock.calls.length).toBe(before);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(
+        fetchMock.mock.calls.filter(([url]) => String(url).includes('search=DEMO')),
+      ).toHaveLength(1);
+      expect(new URL(window.location.href).searchParams.get('page')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Clear search text' }));
+      await act(async () => {});
+      expect(input).toHaveValue('');
+      expect(new URL(window.location.href).searchParams.get('search')).toBeNull();
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+  it('restores the selected page and its filters when the application remounts', async () => {
+    window.history.replaceState(null, '', '/riders?zone=NORTH&search=maya&page=2');
+    const first = render(<App />);
+    expect(await screen.findByLabelText('Rider code')).toHaveValue('maya');
+    expect(screen.getByLabelText('Zone')).toHaveValue('NORTH');
+    first.unmount();
+    render(<App />);
+    expect(await screen.findByLabelText('Rider code')).toHaveValue('maya');
+    expect(screen.getByRole('link', { name: 'Riders' })).toHaveAttribute('aria-current', 'page');
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url]) =>
+            String(url).includes('page=2') &&
+            String(url).includes('search=maya') &&
+            String(url).includes('zone=NORTH'),
+        ),
+      ).toBe(true),
+    );
+  });
+  it('keeps manual refresh feedback for one second even when the real reads return immediately', async () => {
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance'],
+    });
+    let unmount = () => {};
+    try {
+      ({ unmount } = render(<App />));
+      await act(async () => {});
+      const row = screen.getByRole('button', { name: 'DEMO-001' });
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+      await act(async () => {});
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(999);
+      });
+      expect(screen.getByRole('button', { name: 'Refreshing…' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'DEMO-001' })).toBe(row);
+      expect(screen.queryByText('Workspace is up to date')).not.toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled();
+      expect(screen.getByText('Workspace is up to date')).toBeVisible();
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
   });
 });
