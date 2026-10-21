@@ -388,6 +388,7 @@ function Desk({ view }: { view: View }) {
                     <label>
                       <span>Zone</span>
                       <select
+                        aria-label="Zone"
                         value={zone}
                         onChange={(e) => {
                           navigate({ zone: e.target.value, page: 1 });
@@ -405,6 +406,7 @@ function Desk({ view }: { view: View }) {
                       <label>
                         <span>Status</span>
                         <select
+                          aria-label="Status"
                           value={status}
                           onChange={(e) => {
                             navigate({ status: e.target.value, page: 1 });

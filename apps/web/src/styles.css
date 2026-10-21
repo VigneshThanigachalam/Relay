@@ -232,6 +232,9 @@ button svg {
   gap: 6px;
 }
 .nav-item {
+  display: flex;
+  align-items: center;
+  line-height: 1.4;
   justify-content: flex-start;
   gap: 12px;
   border: 0;
@@ -3325,4 +3328,18 @@ fieldset {
 }
 .not-found {
   padding: 3rem;
+}
+
+.overview-controls select {
+  font: inherit;
+  min-height: 36px;
+  padding: 7px 30px 7px 12px;
+  color: var(--ink);
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.nav-item svg,
+.mobile-nav a svg {
+  flex-shrink: 0;
 }
